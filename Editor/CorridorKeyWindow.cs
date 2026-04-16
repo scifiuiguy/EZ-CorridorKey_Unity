@@ -31,6 +31,8 @@ namespace CorridorKey.Editor
         HorizontalViewerIoSplitController? _viewerIoSplit;
         VerticalViewerIoTraySplitController? _viewerIoTraySplit;
         IoFilesBarToggleController? _ioFilesBar;
+        AbScrubberOverlayController? _abScrubberOverlay;
+        SampleAbComparisonRenderer? _sampleAbComparisonRenderer;
 
         bool _immersiveViewersActive;
         bool _savedQueueExpanded;
@@ -87,6 +89,10 @@ namespace CorridorKey.Editor
             _viewerIoTraySplit?.Dispose();
             _viewerIoTraySplit = null;
             _ioFilesBar = null;
+            _abScrubberOverlay?.Dispose();
+            _abScrubberOverlay = null;
+            _sampleAbComparisonRenderer?.Dispose();
+            _sampleAbComparisonRenderer = null;
         }
 
         void CreateGUI()
@@ -98,6 +104,10 @@ namespace CorridorKey.Editor
             _viewerIoTraySplit?.Dispose();
             _viewerIoTraySplit = null;
             _ioFilesBar = null;
+            _abScrubberOverlay?.Dispose();
+            _abScrubberOverlay = null;
+            _sampleAbComparisonRenderer?.Dispose();
+            _sampleAbComparisonRenderer = null;
 
             var root = rootVisualElement;
             root.Clear();
@@ -138,7 +148,19 @@ namespace CorridorKey.Editor
             _viewerIoTraySplit = VerticalViewerIoTraySplitController.TryAttach(body);
             _ioFilesBar = IoFilesBarToggleController.TryAttach(body, _viewerIoSplit, _viewerIoTraySplit);
 
-            _ = new DualViewerChromeController(body);
+            var dualViewerChrome = new DualViewerChromeController(body);
+            _abScrubberOverlay = new AbScrubberOverlayController(body);
+            _sampleAbComparisonRenderer = new SampleAbComparisonRenderer(body);
+            if (_abScrubberOverlay != null && _sampleAbComparisonRenderer != null)
+            {
+                _abScrubberOverlay.SplitChanged += _sampleAbComparisonRenderer.SetSplit;
+                _sampleAbComparisonRenderer.SetSplit(_abScrubberOverlay.MidpointNormalized, _abScrubberOverlay.AngleDeg);
+            }
+            dualViewerChrome.AbToggled += on =>
+            {
+                _abScrubberOverlay?.SetEnabled(on);
+                _sampleAbComparisonRenderer?.SetEnabled(on);
+            };
             _ = new ViewerPlayheadStripController(body);
             _ = new ParametersRailController(body);
             SeedQueueDummyCards(body);
@@ -262,6 +284,22 @@ namespace CorridorKey.Editor
 
             AddCursorRectFor(root.Q<VisualElement>("viewer-split-divider"), MouseCursor.ResizeHorizontal);
             AddCursorRectFor(root.Q<VisualElement>("io-tray-split-divider"), MouseCursor.ResizeVertical);
+            if (_abScrubberOverlay != null)
+            {
+                var badgeRect = _abScrubberOverlay.BadgeWorldBounds;
+                if (badgeRect.width > 0f && badgeRect.height > 0f)
+                {
+                    var tl = root.WorldToLocal(badgeRect.min);
+                    var br = root.WorldToLocal(badgeRect.max);
+                    var guiRect = Rect.MinMaxRect(
+                        Mathf.Min(tl.x, br.x),
+                        Mathf.Min(tl.y, br.y),
+                        Mathf.Max(tl.x, br.x),
+                        Mathf.Max(tl.y, br.y));
+                    EditorGUIUtility.AddCursorRect(guiRect, MouseCursor.MoveArrow);
+                }
+
+            }
         }
 
         static void OnBackendLog(LogPayload payload)

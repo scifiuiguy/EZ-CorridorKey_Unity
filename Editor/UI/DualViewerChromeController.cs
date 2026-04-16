@@ -10,6 +10,8 @@ namespace CorridorKey.Editor.UI
     /// </summary>
     public sealed class DualViewerChromeController
     {
+        public event System.Action<bool>? AbToggled;
+
         readonly Button _abButton;
         readonly Button[] _modeButtons;
         readonly string[] _modeIds;
@@ -66,6 +68,7 @@ namespace CorridorKey.Editor.UI
             evt.StopPropagation();
             _abWipeOn = !_abWipeOn;
             SetAbVisual(_abWipeOn);
+            AbToggled?.Invoke(_abWipeOn);
             Debug.Log(_abWipeOn
                 ? "[CorridorKey] A/B wipe: ON"
                 : "[CorridorKey] A/B wipe: OFF");

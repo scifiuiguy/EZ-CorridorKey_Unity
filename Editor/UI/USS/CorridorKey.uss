@@ -181,3 +181,73 @@
 .corridor-key-root .corridor-key-param-advanced-toggle:hover {
     color: rgb(255, 242, 3);
 }
+
+/* A/B scrubber overlay (phase 1 scaffold) */
+.corridor-key-root .corridor-key-ab-overlay {
+    position: absolute;
+}
+
+.corridor-key-root .corridor-key-ab-line {
+    position: absolute;
+    height: 2px;
+    background-color: rgba(255, 242, 3, 0.95);
+}
+
+.corridor-key-root .corridor-key-ab-line.corridor-key-ab-line--hover {
+    background-color: rgb(255, 255, 255);
+}
+
+.corridor-key-root .corridor-key-ab-line.corridor-key-ab-line--rotating {
+    height: 4px;
+}
+
+.corridor-key-root .corridor-key-ab-badge {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    background-color: rgb(26, 25, 0);
+    border-left-width: 1px;
+    border-right-width: 1px;
+    border-top-width: 1px;
+    border-bottom-width: 1px;
+    border-left-color: rgb(255, 242, 3);
+    border-right-color: rgb(255, 242, 3);
+    border-top-color: rgb(255, 242, 3);
+    border-bottom-color: rgb(255, 242, 3);
+}
+
+.corridor-key-root .corridor-key-ab-badge.corridor-key-ab-badge--hover {
+    border-left-width: 2px;
+    border-right-width: 2px;
+    border-top-width: 2px;
+    border-bottom-width: 2px;
+    border-left-color: rgb(255, 255, 255);
+    border-right-color: rgb(255, 255, 255);
+    border-top-color: rgb(255, 255, 255);
+    border-bottom-color: rgb(255, 255, 255);
+}
+
+.corridor-key-root .corridor-key-ab-badge.corridor-key-ab-badge--dragging {
+    background-color: rgb(255, 242, 3);
+}
+
+.corridor-key-root .corridor-key-ab-badge-a,
+.corridor-key-root .corridor-key-ab-badge-b {
+    position: absolute;
+    top: 0;
+    height: 16px;
+    font-size: 10px;
+    -unity-font-style: bold;
+    width: 12px;
+    unity-text-align: middle-center;
+}
+
+.corridor-key-root .corridor-key-ab-badge-a {
+    left: -24px;
+    color: rgb(255, 242, 3);
+}
+
+.corridor-key-root .corridor-key-ab-badge-b {
+    right: -24px;
+    color: rgb(220, 220, 210);
+}

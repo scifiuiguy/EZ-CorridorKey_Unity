@@ -241,6 +241,7 @@ namespace CorridorKey.Editor.UI
             viewerColumn.style.minHeight = 0;
 
             var dualHost = new VisualElement { name = "dual-viewer-host" };
+            dualHost.style.position = Position.Relative;
             dualHost.style.flexDirection = FlexDirection.Row;
             dualHost.style.flexGrow = 1;
             dualHost.style.minHeight = 120f;
@@ -265,6 +266,7 @@ namespace CorridorKey.Editor.UI
             dualHost.Add(inputCol);
             dualHost.Add(divider);
             dualHost.Add(outputCol);
+            dualHost.Add(BuildAbComparisonHost());
 
             viewerColumn.Add(BuildDualViewerChromeBar());
             viewerColumn.Add(dualHost);
@@ -945,6 +947,78 @@ namespace CorridorKey.Editor.UI
             col.Add(surface);
 
             return col;
+        }
+
+        static VisualElement BuildAbComparisonHost()
+        {
+            var host = new VisualElement { name = "viewer-ab-comparison-host" };
+            host.style.position = Position.Absolute;
+            host.style.left = 0f;
+            host.style.top = 0f;
+            host.style.right = 0f;
+            host.style.bottom = 0f;
+            host.style.display = DisplayStyle.None;
+            host.style.alignItems = Align.Center;
+            host.style.justifyContent = Justify.Center;
+            host.style.backgroundColor = new Color(0.07f, 0.07f, 0.07f, 1f);
+            host.pickingMode = PickingMode.Position;
+            host.AddToClassList("corridor-key-ab-comparison-host");
+
+            var surface = new VisualElement { name = "viewer-ab-comparison-surface" };
+            surface.style.position = Position.Relative;
+            surface.style.width = Length.Percent(100);
+            surface.style.height = Length.Percent(100);
+            surface.style.minWidth = 0f;
+            surface.style.minHeight = 0f;
+            surface.style.alignItems = Align.Center;
+            surface.style.justifyContent = Justify.Center;
+            surface.style.backgroundColor = new Color(0.12f, 0.12f, 0.12f, 1f);
+            surface.style.borderTopWidth = 1f;
+            surface.style.borderBottomWidth = 1f;
+            surface.style.borderLeftWidth = 1f;
+            surface.style.borderRightWidth = 1f;
+            surface.style.borderTopColor = new Color(0.28f, 0.28f, 0.28f);
+            surface.style.borderBottomColor = new Color(0.28f, 0.28f, 0.28f);
+            surface.style.borderLeftColor = new Color(0.28f, 0.28f, 0.28f);
+            surface.style.borderRightColor = new Color(0.28f, 0.28f, 0.28f);
+            surface.style.overflow = Overflow.Hidden;
+
+            var hint = new Label("A/B Comparison View");
+            hint.name = "viewer-ab-comparison-hint";
+            hint.style.fontSize = 10;
+            hint.style.color = new Color(0.45f, 0.45f, 0.42f);
+            hint.pickingMode = PickingMode.Ignore;
+            surface.Add(hint);
+
+            var abOverlay = new VisualElement { name = "viewer-ab-overlay" };
+            abOverlay.style.position = Position.Absolute;
+            abOverlay.style.left = 0f;
+            abOverlay.style.top = 0f;
+            abOverlay.style.right = 0f;
+            abOverlay.style.bottom = 0f;
+            abOverlay.style.display = DisplayStyle.None;
+            abOverlay.AddToClassList("corridor-key-ab-overlay");
+            abOverlay.pickingMode = PickingMode.Position;
+
+            var line = new VisualElement { name = "viewer-ab-line" };
+            line.AddToClassList("corridor-key-ab-line");
+            line.pickingMode = PickingMode.Ignore;
+
+            var badge = new VisualElement { name = "viewer-ab-badge" };
+            badge.AddToClassList("corridor-key-ab-badge");
+            var badgeA = new Label("A");
+            badgeA.AddToClassList("corridor-key-ab-badge-a");
+            var badgeB = new Label("B");
+            badgeB.AddToClassList("corridor-key-ab-badge-b");
+            badge.Add(badgeA);
+            badge.Add(badgeB);
+
+            abOverlay.Add(line);
+            abOverlay.Add(badge);
+            surface.Add(abOverlay);
+            host.Add(surface);
+
+            return host;
         }
 
         static VisualElement BuildIoTray()
