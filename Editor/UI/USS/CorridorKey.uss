@@ -1,0 +1,3 @@
+/* Optional theme hooks — assign from code or add <Style src="..."/> when GUIDs are stable. */
+.corridor-key-root {
+}

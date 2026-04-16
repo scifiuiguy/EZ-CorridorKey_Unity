@@ -1,0 +1,19 @@
+{
+  "name": "com.scifiuiguy.corridorkey",
+  "version": "0.0.1",
+  "displayName": "EZ CorridorKey Unity",
+  "description": "Unity package front-end for CorridorKey workflows with a Python backend bridge.",
+  "unity": "6000.0",
+  "author": {
+    "name": "AJ Campbell",
+    "url": "https://github.com/scifiuiguy"
+  },
+  "keywords": [
+    "corridorkey",
+    "greenscreen",
+    "vfx",
+    "unity",
+    "chroma-key"
+  ],
+  "license": "CC-BY-NC-SA-4.0"
+}

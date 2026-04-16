@@ -1,0 +1,21 @@
+{
+  "name": "CorridorKey.Editor",
+  "rootNamespace": "CorridorKey.Editor",
+  "references": [
+    "CorridorKey.Runtime",
+    "UnityEditor.UIElementsModule",
+    "UnityEngine.UIElementsModule"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "nullable": "enable"
+}

@@ -1,0 +1,4 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" editor-extension-mode="True">
+    <!-- Not used at runtime. Main window UI is built in CorridorKeyWindow.CreateGUI (CorridorKeyWindowLayout.cs). -->
+    <ui:Label text="CorridorKeyWindow layout is built in C# — see CorridorKeyWindowLayout.cs." style="white-space: normal;" />
+</ui:UXML>
