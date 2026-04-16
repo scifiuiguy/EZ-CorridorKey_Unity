@@ -7,10 +7,19 @@ namespace CorridorKey.Editor.UI
     /// EZ <c>ui/main_window.py</c> structural parity: header → top block (queue sidebar beside viewer+params
     /// only; queue bottom aligns with I/O tray top) → full-width I/O tray → status bar.
     /// Queue matches <c>queue_panel.py</c> (left tab strip; height = viewer block, not tray/status).
+    /// INPUT/OUTPUT split uses a draggable divider; I/O tray left width tracks INPUT in pixels
+    /// (<see cref="HorizontalViewerIoSplitController"/>), matching EZ <c>_sync_io_divider</c>.
+    /// <c>io-tray-queue-spacer</c> matches <c>queue-sidebar</c> width so the tray aligns with the viewer row (EZ uses an overlay queue).
     /// </summary>
     public static class CorridorKeyWindowLayout
     {
+        /// <summary>EZ parameters column width (content only; tab is extra).</summary>
         public const float ParametersRailWidthPx = 280f;
+
+        /// <summary>Unity-only vertical tab — same width as <see cref="QueueTabWidthPx"/>.</summary>
+        public const float ParametersTabWidthPx = 24f;
+
+        public const float ParametersExpandedWidthPx = ParametersTabWidthPx + ParametersRailWidthPx;
 
         /// <summary>EZ <c>_TAB_W</c> — always-visible click strip.</summary>
         public const float QueueTabWidthPx = 24f;
@@ -20,6 +29,13 @@ namespace CorridorKey.Editor.UI
 
         /// <summary>EZ <c>_EXPANDED_W</c> = tab + content.</summary>
         public const float QueueExpandedWidthPx = QueueTabWidthPx + QueueContentWidthPx;
+
+        /// <summary>Horizontal strip under INPUTS/EXPORTS with IN/EX tab toggles.</summary>
+        public const float IoTrayFilesBarHeightPx = 22f;
+
+        /// <summary>Tray height when INPUT/EXPORT row is hidden (Files bar + tray padding only).</summary>
+        public const float IoTrayCollapsedHeightPx =
+            6f + 6f + 2f + IoTrayFilesBarHeightPx + 4f;
 
         /// <summary>Root column under the menu bar (flex-grow, fills the window).</summary>
         public static VisualElement BuildMainBodyColumn()
@@ -37,8 +53,9 @@ namespace CorridorKey.Editor.UI
         }
 
         /// <summary>
-        /// Column: [queue | viewer+params] row (flex-grow, ~EZ splitter top) → I/O tray → status bar.
-        /// Queue height stops at the INPUT / I/O tray top (EZ <c>_position_queue_panel</c>).
+        /// Column: viewer+params row (full width) with queue overlaid on the left (EZ overlay parity) → I/O tray → status bar.
+        /// Queue does not steal flex width from parameters; <see cref="HorizontalViewerIoSplitController"/> pads viewer column.
+        /// <see cref="VerticalViewerIoTraySplitController"/> sits between the viewer block and the I/O tray.
         /// </summary>
         static VisualElement BuildWorkspaceColumn()
         {
@@ -49,17 +66,32 @@ namespace CorridorKey.Editor.UI
             column.style.minWidth = 0;
 
             var topBlock = new VisualElement { name = "viewer-params-block-row" };
+            topBlock.style.position = Position.Relative;
             topBlock.style.flexDirection = FlexDirection.Row;
             topBlock.style.flexGrow = 1;
-            topBlock.style.flexShrink = 0;
-            topBlock.style.minHeight = 0;
+            topBlock.style.flexShrink = 1;
+            topBlock.style.minHeight = VerticalViewerIoTraySplitController.MinViewerBlockHeightPx;
             topBlock.style.alignItems = Align.Stretch;
-            topBlock.style.marginBottom = 6f;
+            topBlock.style.marginBottom = 0f;
 
-            topBlock.Add(BuildQueueSidebar());
+            // Main row is full width; queue is added after and positioned absolute so it overlays (parameters stay fixed at right edge).
             topBlock.Add(BuildMainWorkRow());
+            topBlock.Add(BuildQueueSidebar());
+
+            var ioTrayDivider = new VisualElement { name = "io-tray-split-divider" };
+            ioTrayDivider.style.height = VerticalViewerIoTraySplitController.DividerHeightPx;
+            ioTrayDivider.style.flexShrink = 0;
+            ioTrayDivider.style.flexGrow = 0;
+            ioTrayDivider.style.alignSelf = Align.Stretch;
+            ioTrayDivider.style.backgroundColor = new Color(0.18f, 0.18f, 0.17f, 1f);
+            ioTrayDivider.style.borderTopWidth = 1f;
+            ioTrayDivider.style.borderBottomWidth = 1f;
+            ioTrayDivider.style.borderTopColor = new Color(0.38f, 0.38f, 0.36f);
+            ioTrayDivider.style.borderBottomColor = new Color(0.38f, 0.38f, 0.36f);
+            ioTrayDivider.pickingMode = PickingMode.Position;
 
             column.Add(topBlock);
+            column.Add(ioTrayDivider);
             column.Add(BuildIoTray());
             column.Add(BuildStatusBar());
 
@@ -135,6 +167,11 @@ namespace CorridorKey.Editor.UI
             sidebar.style.width = QueueTabWidthPx;
             content.style.display = DisplayStyle.None;
 
+            sidebar.style.position = Position.Absolute;
+            sidebar.style.left = 0f;
+            sidebar.style.top = 0f;
+            sidebar.style.bottom = 0f;
+
             return sidebar;
         }
 
@@ -172,32 +209,83 @@ namespace CorridorKey.Editor.UI
             var row = new VisualElement { name = "main-row" };
             row.style.flexDirection = FlexDirection.Row;
             row.style.flexGrow = 1;
-            row.style.flexShrink = 0;
+            // Must be shrinkable so parameters expansion can reclaim space from viewers.
+            row.style.flexShrink = 1;
             row.style.minWidth = 0;
             row.style.minHeight = 180f;
 
             var viewerColumn = new VisualElement { name = "viewer-column" };
             viewerColumn.style.flexDirection = FlexDirection.Column;
             viewerColumn.style.flexGrow = 1;
-            viewerColumn.style.minWidth = 200f;
+            viewerColumn.style.flexShrink = 1;
+            // Allow shrinking when parameters expand; pane min widths come from viewer panes + split controller.
+            viewerColumn.style.minWidth = 0f;
             viewerColumn.style.minHeight = 0;
 
-            var dualRow = new VisualElement { name = "dual-viewer-row" };
-            dualRow.style.flexDirection = FlexDirection.Row;
-            dualRow.style.flexGrow = 1;
-            dualRow.style.minHeight = 120f;
+            var dualHost = new VisualElement { name = "dual-viewer-host" };
+            dualHost.style.flexDirection = FlexDirection.Row;
+            dualHost.style.flexGrow = 1;
+            dualHost.style.minHeight = 120f;
+            dualHost.style.minWidth = 0;
+            dualHost.style.alignItems = Align.Stretch;
 
-            dualRow.Add(CreateViewerPane("viewer-input", "INPUT"));
-            dualRow.Add(CreateViewerPane("viewer-output", "OUTPUT"));
+            var inputCol = CreateViewerPane("viewer-input", "INPUT");
+            var divider = new VisualElement { name = "viewer-split-divider" };
+            divider.style.width = HorizontalViewerIoSplitController.DividerWidthPx;
+            divider.style.flexShrink = 0;
+            divider.style.flexGrow = 0;
+            divider.style.alignSelf = Align.Stretch;
+            divider.style.backgroundColor = new Color(0.18f, 0.18f, 0.17f, 1f);
+            divider.style.borderLeftWidth = 1f;
+            divider.style.borderRightWidth = 1f;
+            divider.style.borderLeftColor = new Color(0.38f, 0.38f, 0.36f);
+            divider.style.borderRightColor = new Color(0.38f, 0.38f, 0.36f);
+            divider.pickingMode = PickingMode.Position;
 
-            viewerColumn.Add(dualRow);
+            var outputCol = CreateViewerPane("viewer-output", "OUTPUT");
+
+            dualHost.Add(inputCol);
+            dualHost.Add(divider);
+            dualHost.Add(outputCol);
+
+            viewerColumn.Add(dualHost);
+
+            var parametersShell = new VisualElement { name = "parameters-rail-shell" };
+            parametersShell.style.flexDirection = FlexDirection.Row;
+            parametersShell.style.flexShrink = 0;
+            parametersShell.style.flexGrow = 0;
+            parametersShell.style.alignItems = Align.Stretch;
+            parametersShell.style.overflow = Overflow.Hidden;
+            parametersShell.style.marginLeft = 8f;
+            parametersShell.style.width = ParametersExpandedWidthPx;
+
+            var parametersTab = new VisualElement { name = "parameters-tab" };
+            parametersTab.style.width = ParametersTabWidthPx;
+            parametersTab.style.flexShrink = 0;
+            parametersTab.style.flexGrow = 0;
+            parametersTab.style.flexDirection = FlexDirection.Column;
+            parametersTab.style.justifyContent = Justify.Center;
+            parametersTab.style.alignItems = Align.Center;
+            parametersTab.style.backgroundColor = new Color(0.1f, 0.1f, 0.11f, 1f);
+            parametersTab.style.borderLeftWidth = 1f;
+            parametersTab.style.borderLeftColor = new Color(0.28f, 0.28f, 0.28f);
+
+            foreach (var ch in "PARAM")
+            {
+                var letter = new Label(ch.ToString());
+                letter.pickingMode = PickingMode.Ignore;
+                letter.style.fontSize = 11;
+                letter.style.unityFontStyleAndWeight = FontStyle.Bold;
+                letter.style.color = new Color(0.72f, 0.72f, 0.68f);
+                letter.style.unityTextAlign = TextAnchor.MiddleCenter;
+                parametersTab.Add(letter);
+            }
 
             var parametersRail = new VisualElement { name = "parameters-rail" };
             parametersRail.style.width = ParametersRailWidthPx;
             parametersRail.style.flexShrink = 0;
             parametersRail.style.flexGrow = 0;
             parametersRail.style.minHeight = 0;
-            parametersRail.style.marginLeft = 8f;
             parametersRail.style.paddingLeft = 8f;
             parametersRail.style.paddingRight = 8f;
             parametersRail.style.paddingTop = 4f;
@@ -227,8 +315,12 @@ namespace CorridorKey.Editor.UI
             parametersRail.Add(parametersTitle);
             parametersRail.Add(scroll);
 
+            // Content first, tab last — tab sits on the far right (queue tab sits on the far left of its strip).
+            parametersShell.Add(parametersRail);
+            parametersShell.Add(parametersTab);
+
             row.Add(viewerColumn);
-            row.Add(parametersRail);
+            row.Add(parametersShell);
 
             return row;
         }
@@ -236,11 +328,10 @@ namespace CorridorKey.Editor.UI
         static VisualElement CreateViewerPane(string paneName, string title)
         {
             var col = new VisualElement { name = paneName };
-            col.style.flexGrow = 1;
-            col.style.flexBasis = 0;
+            col.style.flexGrow = 0;
+            col.style.flexShrink = 0;
             col.style.flexDirection = FlexDirection.Column;
-            col.style.minWidth = 60f;
-            col.style.marginRight = 4f;
+            col.style.minWidth = HorizontalViewerIoSplitController.MinPaneWidthPx;
 
             var header = new Label(title);
             header.style.unityFontStyleAndWeight = FontStyle.Bold;
@@ -278,13 +369,13 @@ namespace CorridorKey.Editor.UI
         {
             var tray = new VisualElement { name = "io-tray" };
             tray.style.flexShrink = 0;
-            tray.style.flexDirection = FlexDirection.Row;
-            tray.style.minHeight = 72f;
+            tray.style.flexGrow = 0;
+            tray.style.flexDirection = FlexDirection.Column;
+            tray.style.height = 150f;
+            tray.style.minHeight = VerticalViewerIoTraySplitController.MinIoTrayHeightPx;
             tray.style.marginBottom = 6f;
             tray.style.paddingTop = 6f;
             tray.style.paddingBottom = 6f;
-            tray.style.paddingLeft = 8f;
-            tray.style.paddingRight = 8f;
             tray.style.backgroundColor = new Color(0.16f, 0.16f, 0.15f, 0.9f);
             tray.style.borderTopWidth = 1f;
             tray.style.borderBottomWidth = 1f;
@@ -295,8 +386,25 @@ namespace CorridorKey.Editor.UI
             tray.style.borderLeftColor = new Color(0.3f, 0.3f, 0.28f);
             tray.style.borderRightColor = new Color(0.3f, 0.3f, 0.28f);
 
+            var trayRow = new VisualElement { name = "io-tray-row" };
+            trayRow.style.flexDirection = FlexDirection.Row;
+            trayRow.style.flexGrow = 1;
+            trayRow.style.minHeight = 56f;
+            trayRow.style.alignItems = Align.Stretch;
+
+            // Matches queue sidebar width so INPUT/EXPORTS line up with dual viewers (EZ uses overlay queue; we use flex).
+            var queueSpacer = new VisualElement { name = "io-tray-queue-spacer" };
+            queueSpacer.style.flexShrink = 0;
+            queueSpacer.style.width = 0f;
+
+            var splitRow = new VisualElement { name = "io-tray-split-row" };
+            splitRow.style.flexDirection = FlexDirection.Row;
+            splitRow.style.flexGrow = 1;
+            splitRow.style.minWidth = 0;
+            splitRow.style.alignItems = Align.Stretch;
+
             var inputSide = new VisualElement { name = "io-tray-input" };
-            inputSide.style.flexGrow = 1;
+            inputSide.style.flexShrink = 0;
             inputSide.style.flexDirection = FlexDirection.Column;
             var inputTitle = new Label("INPUT (0)  —  import / clip list");
             inputTitle.style.fontSize = 11;
@@ -305,15 +413,59 @@ namespace CorridorKey.Editor.UI
 
             var exportSide = new VisualElement { name = "io-tray-exports" };
             exportSide.style.flexGrow = 1;
+            exportSide.style.flexShrink = 0;
             exportSide.style.flexDirection = FlexDirection.Column;
-            exportSide.style.marginLeft = 12f;
+            exportSide.style.minWidth = 0;
+            // Visible seam vs INPUT (backgrounds are similar); aligns with OUTPUT column edge when split is synced.
+            exportSide.style.borderLeftWidth = 2f;
+            exportSide.style.borderLeftColor = new Color(0.62f, 0.58f, 0.38f, 1f);
+            exportSide.style.paddingLeft = 6f;
             var exportTitle = new Label("EXPORTS (0)");
             exportTitle.style.fontSize = 11;
             exportTitle.style.unityFontStyleAndWeight = FontStyle.Bold;
             exportSide.Add(exportTitle);
 
-            tray.Add(inputSide);
-            tray.Add(exportSide);
+            splitRow.Add(inputSide);
+            splitRow.Add(exportSide);
+            trayRow.Add(queueSpacer);
+            trayRow.Add(splitRow);
+            tray.Add(trayRow);
+
+            var filesBar = new VisualElement { name = "io-files-bar" };
+            filesBar.style.flexDirection = FlexDirection.Row;
+            filesBar.style.flexShrink = 0;
+            filesBar.style.flexGrow = 0;
+            filesBar.style.height = IoTrayFilesBarHeightPx;
+            filesBar.style.alignItems = Align.Stretch;
+            filesBar.style.marginTop = 2f;
+            // Full-bar fill so io-files-bar-queue-spacer (transparent) doesn't show the lighter io-tray surface behind it.
+            filesBar.style.backgroundColor = new Color(0.12f, 0.12f, 0.11f, 1f);
+            filesBar.style.borderTopWidth = 1f;
+            filesBar.style.borderTopColor = new Color(0.28f, 0.28f, 0.26f);
+
+            var filesQueueSpacer = new VisualElement { name = "io-files-bar-queue-spacer" };
+            filesQueueSpacer.style.flexShrink = 0;
+            filesQueueSpacer.style.width = 0f;
+
+            var filesRest = new VisualElement { name = "io-files-bar-rest" };
+            filesRest.style.flexDirection = FlexDirection.Row;
+            filesRest.style.flexGrow = 1;
+            filesRest.style.minWidth = 0;
+            filesRest.style.alignItems = Align.Stretch;
+            filesRest.style.justifyContent = Justify.Center;
+            filesRest.style.backgroundColor = new Color(0.12f, 0.12f, 0.11f, 1f);
+            filesRest.pickingMode = PickingMode.Position;
+
+            var filesTitle = new Label("Files");
+            filesTitle.style.fontSize = 10;
+            filesTitle.style.unityFontStyleAndWeight = FontStyle.Bold;
+            filesTitle.style.color = new Color(0.62f, 0.62f, 0.58f);
+            filesTitle.pickingMode = PickingMode.Ignore;
+            filesRest.Add(filesTitle);
+
+            filesBar.Add(filesQueueSpacer);
+            filesBar.Add(filesRest);
+            tray.Add(filesBar);
 
             return tray;
         }
