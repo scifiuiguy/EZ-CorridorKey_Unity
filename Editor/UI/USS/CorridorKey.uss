@@ -1,3 +1,183 @@
 /* Optional theme hooks — assign from code or add <Style src="..."/> when GUIDs are stable. */
 .corridor-key-root {
 }
+
+/* Status bar ProgressBar: yellow fill (scoped via .corridor-key-status-progress on the bar). */
+.corridor-key-status-progress .unity-progress-bar__progress {
+    background-color: rgb(232, 200, 40);
+}
+
+/* I/O tray INPUT header — EZ corridor_theme.qss QPushButton#trayAddBtn (brand #FFF203). */
+.corridor-key-io-tray-btn {
+    background-color: transparent;
+    border-left-width: 1px;
+    border-right-width: 1px;
+    border-top-width: 1px;
+    border-bottom-width: 1px;
+    border-left-color: #333320;
+    border-right-color: #333320;
+    border-top-color: #333320;
+    border-bottom-color: #333320;
+    color: #999980;
+    -unity-font-style: bold;
+    font-size: 11px;
+    letter-spacing: 1px;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    padding-top: 2px;
+    padding-bottom: 2px;
+    padding-left: 10px;
+    padding-right: 10px;
+}
+
+.corridor-key-io-tray-btn:hover {
+    color: #FFF203;
+    border-left-color: #FFF203;
+    border-right-color: #FFF203;
+    border-top-color: #FFF203;
+    border-bottom-color: #FFF203;
+    background-color: rgba(255, 242, 3, 0.08);
+}
+
+.corridor-key-io-tray-btn:active {
+    background-color: rgba(255, 242, 3, 0.15);
+}
+
+/* Status bar primary CTA — EZ corridor_theme.qss QWidget#statusBar QPushButton#runButton */
+.corridor-key-run-selected-btn {
+    background-color: #FFF203;
+    color: #000000;
+    -unity-font-style: bold;
+    font-size: 14px;
+    border-left-width: 0;
+    border-right-width: 0;
+    border-top-width: 0;
+    border-bottom-width: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    padding-left: 20px;
+    padding-right: 20px;
+}
+
+.corridor-key-run-selected-btn:hover {
+    background-color: #FFFF66;
+}
+
+.corridor-key-run-selected-btn:active {
+    background-color: #D1C700;
+}
+
+.corridor-key-run-selected-btn:disabled {
+    background-color: #444430;
+    color: #888870;
+}
+
+/* Dual-viewer chrome — EZ view_mode_bar._button_style + PreviewViewport A/B (Qt #1A1900 / #FFF203, hover border #454430) */
+.corridor-key-root .corridor-key-ez-chrome-btn {
+    background-color: rgb(26, 25, 0);
+    color: rgb(128, 128, 112);
+    font-size: 10px;
+    padding-left: 6px;
+    padding-right: 6px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+    border-left-width: 1px;
+    border-right-width: 1px;
+    border-top-width: 1px;
+    border-bottom-width: 1px;
+    border-left-color: rgb(42, 41, 16);
+    border-right-color: rgb(42, 41, 16);
+    border-top-color: rgb(42, 41, 16);
+    border-bottom-color: rgb(42, 41, 16);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    -unity-font-style: normal;
+}
+
+.corridor-key-root .corridor-key-ez-chrome-btn:hover {
+    border-left-color: rgb(69, 68, 48);
+    border-right-color: rgb(69, 68, 48);
+    border-top-color: rgb(69, 68, 48);
+    border-bottom-color: rgb(69, 68, 48);
+    color: rgb(224, 224, 224);
+}
+
+.corridor-key-root .corridor-key-ez-chrome-btn.corridor-key-ez-chrome-btn--active {
+    background-color: rgb(255, 242, 3);
+    color: rgb(0, 0, 0);
+    -unity-font-style: bold;
+    border-left-width: 0;
+    border-right-width: 0;
+    border-top-width: 0;
+    border-bottom-width: 0;
+}
+
+.corridor-key-root .corridor-key-ez-chrome-btn.corridor-key-ez-chrome-btn--active:hover {
+    background-color: rgb(255, 242, 3);
+    color: rgb(0, 0, 0);
+    border-left-width: 0;
+    border-right-width: 0;
+    border-top-width: 0;
+    border-bottom-width: 0;
+}
+
+/* Playhead strip — EZ frame_scrubber.py transport buttons */
+.corridor-key-root .corridor-key-playhead-transport-btn {
+    background-color: transparent;
+    color: rgb(128, 128, 112);
+    border-left-width: 0;
+    border-right-width: 0;
+    border-top-width: 0;
+    border-bottom-width: 0;
+    font-size: 14px;
+    padding-left: 4px;
+    padding-right: 4px;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+.corridor-key-root .corridor-key-playhead-transport-btn:hover {
+    color: rgb(224, 224, 224);
+}
+
+.corridor-key-root .corridor-key-playhead-transport-btn:disabled {
+    color: rgb(58, 58, 48);
+}
+
+/* Playhead slider — brand yellow dragger, dark groove (EZ feel) */
+.corridor-key-root .corridor-key-playhead-slider .unity-base-slider__dragger {
+    background-color: rgb(255, 242, 3);
+    border-radius: 0;
+}
+
+.corridor-key-root .corridor-key-playhead-slider .unity-base-slider__tracker {
+    background-color: rgb(69, 68, 48);
+    border-radius: 0;
+}
+
+/* Parameters rail — Advanced fold, radio groups */
+.corridor-key-root .corridor-key-param-advanced-toggle {
+    background-color: transparent;
+    color: rgb(200, 200, 120);
+    border-left-width: 0;
+    border-right-width: 0;
+    border-top-width: 0;
+    border-bottom-width: 1px;
+    border-bottom-color: rgb(80, 78, 50);
+    font-size: 10px;
+    padding-left: 0;
+    padding-top: 4px;
+    padding-bottom: 4px;
+}
+
+.corridor-key-root .corridor-key-param-advanced-toggle:hover {
+    color: rgb(255, 242, 3);
+}

@@ -21,7 +21,8 @@ namespace CorridorKey.Editor
         public const string WindowTitle = "EZ CorridorKey";
 
         /// <summary>Minimum window size (dual viewers + parameters tab + 280px content).</summary>
-        public static readonly Vector2 MinWindowSize = new Vector2(904f, 442f);
+        /// <summary>Includes playhead strip (~48px) below dual viewers.</summary>
+        public static readonly Vector2 MinWindowSize = new Vector2(904f, 490f);
 
         ProcessBackendClient? _backend;
         CorridorKeySessionVm? _session;
@@ -35,6 +36,14 @@ namespace CorridorKey.Editor
         bool _savedQueueExpanded;
         bool _savedParamsExpanded;
         bool _savedFilesExpanded;
+
+        /// <summary>Debug: when true, advances the status bar by 10% every 0.5s. Private + NonSerialized so Unity does not persist it on the window (public fields on EditorWindow do).</summary>
+        [System.NonSerialized]
+        bool _testLoadAnimation;
+
+        ProgressBar? _inferenceLoadProgress;
+        IVisualElementScheduledItem? _inferenceLoadTestSchedule;
+        float _testLoadAnimPercent;
 
         [MenuItem("Tools/CorridorKey/Open", false, 10)]
         public static void OpenWindow()
@@ -60,6 +69,8 @@ namespace CorridorKey.Editor
 
         void OnDisable()
         {
+            StopInferenceLoadTestAnimation();
+
             if (_backend != null)
             {
                 _backend.LogReceived -= OnBackendLog;
@@ -80,6 +91,8 @@ namespace CorridorKey.Editor
 
         void CreateGUI()
         {
+            StopInferenceLoadTestAnimation();
+
             _viewerIoSplit?.Dispose();
             _viewerIoSplit = null;
             _viewerIoTraySplit?.Dispose();
@@ -95,6 +108,10 @@ namespace CorridorKey.Editor
             root.style.paddingBottom = 8f;
             root.style.paddingLeft = 8f;
             root.userData = _session;
+            root.AddToClassList("corridor-key-root");
+            var corridorStyles = CorridorKeyUxmlPaths.LoadCorridorKeyStyleSheet();
+            if (corridorStyles != null)
+                root.styleSheets.Add(corridorStyles);
 
             var menuHost = new VisualElement { name = "menu-bar-host" };
             menuHost.style.flexShrink = 0;
@@ -121,7 +138,61 @@ namespace CorridorKey.Editor
             _viewerIoTraySplit = VerticalViewerIoTraySplitController.TryAttach(body);
             _ioFilesBar = IoFilesBarToggleController.TryAttach(body, _viewerIoSplit, _viewerIoTraySplit);
 
+            _ = new DualViewerChromeController(body);
+            _ = new ViewerPlayheadStripController(body);
+            _ = new ParametersRailController(body);
+            SeedQueueDummyCards(body);
+
+            body.Q<Button>("status-run-selected")?.RegisterCallback<ClickEvent>(_ =>
+                Debug.Log("[CorridorKey] RUN SELECTED clicked."));
+
+            body.Q<Button>("io-tray-input-reset-io")?.RegisterCallback<ClickEvent>(_ =>
+                Debug.Log("[CorridorKey] RESET IO clicked."));
+            body.Q<Button>("io-tray-input-add")?.RegisterCallback<ClickEvent>(_ =>
+                Debug.Log("[CorridorKey] ADD clicked."));
+            body.Q<Button>("queue-clear-button")?.RegisterCallback<ClickEvent>(_ =>
+            {
+                var queueScroll = body.Q<ScrollView>("queue-scroll");
+                queueScroll?.Clear();
+                Debug.Log("[CorridorKey] Queue > CLEAR clicked.");
+            });
+
+            _inferenceLoadProgress = body.Q<ProgressBar>("status-inference-loading");
+            if (_inferenceLoadProgress != null)
+            {
+                _inferenceLoadProgress.lowValue = 0f;
+                _inferenceLoadProgress.highValue = 100f;
+                if (_testLoadAnimation)
+                {
+                    _inferenceLoadProgress.style.display = DisplayStyle.Flex;
+                    _testLoadAnimPercent = 0f;
+                    _inferenceLoadProgress.value = 0f;
+                    _inferenceLoadTestSchedule = _inferenceLoadProgress.schedule.Execute(() =>
+                    {
+                        if (!_testLoadAnimation || _inferenceLoadProgress == null)
+                            return;
+                        _testLoadAnimPercent += 10f;
+                        if (_testLoadAnimPercent > 100f)
+                            _testLoadAnimPercent = 0f;
+                        _inferenceLoadProgress.value = _testLoadAnimPercent;
+                    }).Every(500);
+                }
+                else
+                {
+                    _inferenceLoadProgress.style.display = DisplayStyle.Flex;
+                    _testLoadAnimPercent = 0f;
+                    _inferenceLoadProgress.value = 0f;
+                }
+            }
+
             _immersiveViewersActive = false;
+        }
+
+        void StopInferenceLoadTestAnimation()
+        {
+            _inferenceLoadTestSchedule?.Pause();
+            _inferenceLoadTestSchedule = null;
+            _inferenceLoadProgress = null;
         }
 
         // Immersive toggle: key handling lives in OnGUI — EditorWindow keyboard input goes through IMGUI, not UITK KeyDownEvent.
@@ -222,12 +293,215 @@ namespace CorridorKey.Editor
 
             var fileMenu = new ToolbarMenu { text = "File" };
             fileMenu.menu.AppendAction(
-                "Run Backend Health Check",
-                _ => RunBackendHealthCheck(),
+                "Import Clips/Import Folder...",
+                _ => OnMenuImportFolder(),
                 _ => DropdownMenuAction.Status.Normal);
-            // EZ parity: add Open project, preferences, quit, etc. here later.
+            fileMenu.menu.AppendAction(
+                "Import Clips/Import Video(s)...",
+                _ => OnMenuImportVideos(),
+                _ => DropdownMenuAction.Status.Normal);
+            fileMenu.menu.AppendAction(
+                "Import Clips/Import Image Sequence...",
+                _ => OnMenuImportImageSequence(),
+                _ => DropdownMenuAction.Status.Normal);
+            fileMenu.menu.AppendSeparator(string.Empty);
+            fileMenu.menu.AppendAction(
+                "Save Session",
+                _ => OnMenuSaveSession(),
+                _ => DropdownMenuAction.Status.Normal);
+            fileMenu.menu.AppendAction(
+                "Open Project...",
+                _ => OnMenuOpenProject(),
+                _ => DropdownMenuAction.Status.Normal);
+            fileMenu.menu.AppendSeparator(string.Empty);
+            fileMenu.menu.AppendAction(
+                "Export Video...",
+                _ => OnMenuExportVideo(),
+                _ => DropdownMenuAction.Status.Normal);
+            fileMenu.menu.AppendAction(
+                "Export All Videos",
+                _ => OnMenuExportAllVideos(),
+                _ => DropdownMenuAction.Status.Normal);
+            fileMenu.menu.AppendSeparator(string.Empty);
+            fileMenu.menu.AppendAction(
+                "Return to Home",
+                _ => OnMenuReturnToHome(),
+                _ => DropdownMenuAction.Status.Normal);
+            fileMenu.menu.AppendAction(
+                "Exit",
+                _ => OnMenuExit(),
+                _ => DropdownMenuAction.Status.Normal);
             toolbar.Add(fileMenu);
+
+            var editMenu = new ToolbarMenu { text = "Edit" };
+            editMenu.menu.AppendAction(
+                "Preferences...",
+                _ => OnMenuPreferences(),
+                _ => DropdownMenuAction.Status.Normal);
+            editMenu.menu.AppendAction(
+                "Hotkeys...",
+                _ => OnMenuHotkeys(),
+                _ => DropdownMenuAction.Status.Normal);
+            editMenu.menu.AppendSeparator(string.Empty);
+            editMenu.menu.AppendAction(
+                "Track Paint Masks",
+                _ => OnMenuTrackPaintMasks(),
+                _ => DropdownMenuAction.Status.Normal);
+            editMenu.menu.AppendAction(
+                "Clear Paint Strokes",
+                _ => OnMenuClearPaintStrokes(),
+                _ => DropdownMenuAction.Status.Normal);
+            toolbar.Add(editMenu);
+
+            var viewMenu = new ToolbarMenu { text = "View" };
+            viewMenu.menu.AppendAction(
+                "Reset Layout",
+                _ => OnMenuResetLayout(),
+                _ => DropdownMenuAction.Status.Normal);
+            viewMenu.menu.AppendAction(
+                "Toggle Queue Panel",
+                _ => OnMenuToggleQueuePanel(),
+                _ => DropdownMenuAction.Status.Normal);
+            viewMenu.menu.AppendAction(
+                "Reset Zoom",
+                _ => OnMenuResetZoom(),
+                _ => DropdownMenuAction.Status.Normal);
+            toolbar.Add(viewMenu);
+
+            var helpMenu = new ToolbarMenu { text = "Help" };
+            helpMenu.menu.AppendAction(
+                "Console",
+                _ => OnMenuConsole(),
+                _ => DropdownMenuAction.Status.Normal);
+            helpMenu.menu.AppendSeparator(string.Empty);
+            helpMenu.menu.AppendAction(
+                "Report Issue...",
+                _ => OnMenuReportIssue(),
+                _ => DropdownMenuAction.Status.Normal);
+            helpMenu.menu.AppendSeparator(string.Empty);
+            helpMenu.menu.AppendAction(
+                "About",
+                _ => OnMenuAbout(),
+                _ => DropdownMenuAction.Status.Normal);
+            toolbar.Add(helpMenu);
+
             host.Add(toolbar);
+        }
+
+        static void SeedQueueDummyCards(VisualElement body)
+        {
+            var queueScroll = body.Q<ScrollView>("queue-scroll");
+            if (queueScroll == null)
+                return;
+
+            queueScroll.Clear();
+            for (var i = 1; i <= 10; i++)
+            {
+                var card = QueueJobCardFactory.Create(
+                    typeText: i % 3 == 0 ? "INFERENCE" : (i % 2 == 0 ? "ALPHA" : "EXTRACT"),
+                    fileText: $"shot_{i:00}_greenscreen.mov",
+                    statusText: i % 4 == 0 ? "Queued" : (i % 5 == 0 ? "Ready" : "Waiting for worker"),
+                    onRemove: el => el.RemoveFromHierarchy());
+                queueScroll.Add(card);
+            }
+
+            Debug.Log("[CorridorKey] Seeded 10 dummy queue job cards (debug).");
+        }
+
+        static void OnMenuImportFolder()
+        {
+            Debug.Log("[CorridorKey] File > Import Clips > Import Folder... clicked.");
+        }
+
+        static void OnMenuImportVideos()
+        {
+            Debug.Log("[CorridorKey] File > Import Clips > Import Video(s)... clicked.");
+        }
+
+        static void OnMenuImportImageSequence()
+        {
+            Debug.Log("[CorridorKey] File > Import Clips > Import Image Sequence... clicked.");
+        }
+
+        static void OnMenuSaveSession()
+        {
+            Debug.Log("[CorridorKey] File > Save Session clicked.");
+        }
+
+        static void OnMenuOpenProject()
+        {
+            Debug.Log("[CorridorKey] File > Open Project... clicked.");
+        }
+
+        static void OnMenuExportVideo()
+        {
+            Debug.Log("[CorridorKey] File > Export Video... clicked.");
+        }
+
+        static void OnMenuExportAllVideos()
+        {
+            Debug.Log("[CorridorKey] File > Export All Videos clicked.");
+        }
+
+        static void OnMenuReturnToHome()
+        {
+            Debug.Log("[CorridorKey] File > Return to Home clicked.");
+        }
+
+        static void OnMenuPreferences()
+        {
+            Debug.Log("[CorridorKey] Edit > Preferences... clicked.");
+        }
+
+        static void OnMenuHotkeys()
+        {
+            Debug.Log("[CorridorKey] Edit > Hotkeys... clicked.");
+        }
+
+        static void OnMenuTrackPaintMasks()
+        {
+            Debug.Log("[CorridorKey] Edit > Track Paint Masks clicked.");
+        }
+
+        static void OnMenuClearPaintStrokes()
+        {
+            Debug.Log("[CorridorKey] Edit > Clear Paint Strokes clicked.");
+        }
+
+        static void OnMenuResetLayout()
+        {
+            Debug.Log("[CorridorKey] View > Reset Layout clicked.");
+        }
+
+        static void OnMenuToggleQueuePanel()
+        {
+            Debug.Log("[CorridorKey] View > Toggle Queue Panel clicked.");
+        }
+
+        static void OnMenuResetZoom()
+        {
+            Debug.Log("[CorridorKey] View > Reset Zoom clicked.");
+        }
+
+        static void OnMenuConsole()
+        {
+            Debug.Log("[CorridorKey] Help > Console clicked.");
+        }
+
+        static void OnMenuReportIssue()
+        {
+            Debug.Log("[CorridorKey] Help > Report Issue... clicked.");
+        }
+
+        static void OnMenuAbout()
+        {
+            Debug.Log("[CorridorKey] Help > About clicked.");
+        }
+
+        void OnMenuExit()
+        {
+            Debug.Log("[CorridorKey] File > Exit clicked.");
+            Close();
         }
     }
 }

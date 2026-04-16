@@ -29,5 +29,22 @@ namespace CorridorKey.Editor.UI
 
             return null;
         }
+
+        /// <summary>Loads <c>Editor/UI/USS/CorridorKey.uss</c> from this package (for ProgressBar and theme hooks).</summary>
+        public static StyleSheet? LoadCorridorKeyStyleSheet()
+        {
+            var guids = AssetDatabase.FindAssets("CorridorKey t:StyleSheet");
+            foreach (var guid in guids)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (!path.EndsWith("CorridorKey.uss", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (path.IndexOf("UI/USS", StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+                return AssetDatabase.LoadAssetAtPath<StyleSheet>(path);
+            }
+
+            return null;
+        }
     }
 }

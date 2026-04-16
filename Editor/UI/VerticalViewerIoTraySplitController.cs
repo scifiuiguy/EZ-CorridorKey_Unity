@@ -14,8 +14,8 @@ namespace CorridorKey.Editor.UI
 
         public const float MinIoTrayHeightPx = 96f;
 
-        /// <summary>Minimum height for viewer+queue+params block (dual viewers + chrome).</summary>
-        public const float MinViewerBlockHeightPx = 200f;
+        /// <summary>Minimum height for viewer+queue+params block (dual viewers + chrome + playhead strip).</summary>
+        public const float MinViewerBlockHeightPx = 252f;
 
         readonly VisualElement _workspaceColumn;
         readonly VisualElement _divider;
