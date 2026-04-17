@@ -248,7 +248,20 @@ namespace CorridorKey.Editor
                 }
             }
 
-            _immersiveViewersActive = false;
+            // Do not reset _immersiveViewersActive here: CreateGUI can run again while the window is open (e.g. after
+            // script reload). Clearing the flag made the next SHIFT+SPACE take the "enter immersive" path again,
+            // saving all-false expanded state and making "restore" appear to do nothing.
+            if (_immersiveViewersActive)
+            {
+                _queueSidebar?.SetExpanded(false);
+                _parametersSidebar?.SetExpanded(false);
+                _ioFilesBar?.SetExpanded(false);
+                _viewerIoSplit?.RefreshIoTrayLayout();
+            }
+
+            // Immersive hotkey: handle via UITK at root + trickle-down. Keyboard focus after the first toggle often
+            // lives on UITK elements, so IMGUI OnGUI may not receive KeyDown for the second press — restore looked broken.
+            root.RegisterCallback<KeyDownEvent>(OnRootImmersiveHotkey, TrickleDown.TrickleDown);
         }
 
         void ApplyAbPreviewMode()
@@ -283,7 +296,17 @@ namespace CorridorKey.Editor
             _inferenceLoadProgress = null;
         }
 
-        // Immersive toggle: key handling lives in OnGUI — EditorWindow keyboard input goes through IMGUI, not UITK KeyDownEvent.
+        void OnRootImmersiveHotkey(KeyDownEvent evt)
+        {
+            if (evt.keyCode != KeyCode.Space)
+                return;
+            if (!evt.shiftKey && (evt.modifiers & EventModifiers.Shift) == 0)
+                return;
+            evt.StopPropagation();
+            evt.PreventDefault();
+            ToggleImmersiveViewers();
+        }
+
         void ToggleImmersiveViewers()
         {
             if (!_immersiveViewersActive)
@@ -313,14 +336,6 @@ namespace CorridorKey.Editor
         void OnGUI()
         {
             var e = Event.current;
-            if (e.type == EventType.KeyDown &&
-                e.keyCode == KeyCode.Space &&
-                (e.shift || (e.modifiers & EventModifiers.Shift) != 0) &&
-                focusedWindow == this)
-            {
-                e.Use();
-                ToggleImmersiveViewers();
-            }
 
             // UITK style.cursor is unreliable for Editor windows; IMGUI cursor rects work consistently.
             var root = rootVisualElement;
