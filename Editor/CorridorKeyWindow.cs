@@ -36,6 +36,7 @@ namespace CorridorKey.Editor
         AbScrubberOverlayController? _abScrubberOverlay;
         SampleAbComparisonRenderer? _sampleAbComparisonRenderer;
         GpuAbComparisonRenderer? _gpuAbComparisonRenderer;
+        GpuMeterHeaderController? _gpuMeterHeader;
 
         /// <summary>Unity may persist <see cref="EditorWindow"/> fields across domain reloads; reset in <see cref="CreateGUI"/>.</summary>
         [System.NonSerialized]
@@ -107,6 +108,8 @@ namespace CorridorKey.Editor
             _sampleAbComparisonRenderer = null;
             _gpuAbComparisonRenderer?.Dispose();
             _gpuAbComparisonRenderer = null;
+            _gpuMeterHeader?.Dispose();
+            _gpuMeterHeader = null;
         }
 
         void CreateGUI()
@@ -129,6 +132,8 @@ namespace CorridorKey.Editor
             _sampleAbComparisonRenderer = null;
             _gpuAbComparisonRenderer?.Dispose();
             _gpuAbComparisonRenderer = null;
+            _gpuMeterHeader?.Dispose();
+            _gpuMeterHeader = null;
             _inferenceSectionController = null;
             _outputPerformanceSectionController = null;
 
@@ -154,6 +159,8 @@ namespace CorridorKey.Editor
             var body = CorridorKeyWindowLayout.BuildMainBodyColumn();
             body.style.flexGrow = 1;
             root.Add(body);
+
+            _gpuMeterHeader = new GpuMeterHeaderController(body);
 
             var sidebar = body.Q<VisualElement>("queue-sidebar");
             var queueContent = body.Q<VisualElement>("queue-content");

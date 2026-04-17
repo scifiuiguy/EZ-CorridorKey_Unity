@@ -223,13 +223,55 @@ namespace CorridorKey.Editor.UI
             brand.style.fontSize = 13;
             brand.style.flexGrow = 0;
 
-            var gpu = new Label("GPU | VRAM — / —");
-            gpu.name = "header-gpu-placeholder";
-            gpu.style.fontSize = 11;
-            gpu.style.color = new Color(0.65f, 0.65f, 0.6f);
+            // Right cluster: EZ main_window.py parity (GPU name, VRAM label, bar, used/total). Shown only when
+            // NVML loads on Windows Editor — see <see cref="GpuMeterHeaderController"/>.
+            var meterHost = new VisualElement { name = "header-gpu-meter" };
+            meterHost.style.flexDirection = FlexDirection.Row;
+            meterHost.style.alignItems = Align.Center;
+            meterHost.style.flexShrink = 0;
+            meterHost.style.flexGrow = 0;
+            meterHost.style.display = DisplayStyle.None;
+
+            var gpuName = new Label("");
+            gpuName.name = "header-gpu-name";
+            gpuName.style.fontSize = 10;
+            gpuName.style.color = new Color(0.5f, 0.5f, 0.44f, 1f);
+            gpuName.style.paddingRight = 6;
+            gpuName.pickingMode = PickingMode.Ignore;
+            gpuName.tooltip = "Detected GPU used for inference";
+
+            var vramCaption = new Label("VRAM");
+            vramCaption.name = "header-vram-label";
+            vramCaption.style.fontSize = 10;
+            vramCaption.style.color = new Color(0.5f, 0.5f, 0.44f, 1f);
+            vramCaption.style.paddingRight = 4;
+            vramCaption.pickingMode = PickingMode.Ignore;
+
+            var vramBar = new ProgressBar { title = " " };
+            vramBar.name = "header-vram-bar";
+            vramBar.AddToClassList("corridor-key-vram-meter");
+            vramBar.style.width = 80f;
+            vramBar.style.height = 8f;
+            vramBar.style.flexShrink = 0;
+            vramBar.style.marginRight = 4;
+            vramBar.pickingMode = PickingMode.Ignore;
+            vramBar.tooltip = "GPU video memory usage";
+
+            var vramText = new Label("");
+            vramText.name = "header-vram-text";
+            vramText.style.fontSize = 10;
+            vramText.style.color = new Color(0.6f, 0.6f, 0.5f, 1f);
+            vramText.style.minWidth = 70f;
+            vramText.pickingMode = PickingMode.Ignore;
+            vramText.tooltip = "Current VRAM used / total";
+
+            meterHost.Add(gpuName);
+            meterHost.Add(vramCaption);
+            meterHost.Add(vramBar);
+            meterHost.Add(vramText);
 
             row.Add(brand);
-            row.Add(gpu);
+            row.Add(meterHost);
 
             return row;
         }

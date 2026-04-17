@@ -251,3 +251,26 @@
     right: -24px;
     color: rgb(220, 220, 210);
 }
+
+/* Header VRAM meter — EZ corridor_theme.qss QProgressBar#vramMeter */
+.corridor-key-vram-meter {
+    height: 8px;
+}
+
+/* Fill clips a full-track gradient (green→yellow→red) drawn in code; USS linear-gradient on this node broke UITK. */
+.corridor-key-vram-meter .unity-progress-bar__progress {
+    background-color: rgba(0, 0, 0, 0);
+    overflow: hidden;
+}
+
+.corridor-key-vram-meter .corridor-key-vram-gradient-inner {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+}
+
+.corridor-key-vram-meter .unity-progress-bar__background {
+    background-color: rgb(69, 68, 48);
+    border-width: 0;
+}
