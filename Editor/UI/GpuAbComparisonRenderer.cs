@@ -27,6 +27,8 @@ namespace CorridorKey.Editor.UI
         RenderTexture? _renderTexture;
         Material? _material;
         bool _enabled;
+        bool _disposed;
+        bool _deferredPreviewRebuildPending;
         Vector2 _midpointNormalized = new Vector2(0.5f, 0.5f);
         float _angleDeg = 90f;
 
@@ -58,6 +60,12 @@ namespace CorridorKey.Editor.UI
 
         public void Dispose()
         {
+            _disposed = true;
+            if (_deferredPreviewRebuildPending)
+            {
+                EditorApplication.delayCall -= OnDeferredPreviewRebuild;
+                _deferredPreviewRebuildPending = false;
+            }
             _surface.UnregisterCallback<GeometryChangedEvent>(OnSurfaceGeometryChanged);
             if (_renderTexture != null)
             {
@@ -108,14 +116,38 @@ namespace CorridorKey.Editor.UI
         {
             _midpointNormalized = midpointNormalized;
             _angleDeg = angleDeg;
+            // SplitChanged is raised from AbScrubberOverlay UpdateOverlayVisuals on every overlay GeometryChanged
+            // (FILES bar + PARAMETERS change I/O tray / rail size). That bypasses viewer-ab-comparison-surface
+            // geometry debounce unless we defer here too.
             if (_enabled)
-                RebuildPreview();
+                ScheduleDeferredPreviewRebuild();
         }
 
         void OnSurfaceGeometryChanged(GeometryChangedEvent evt)
         {
-            if (_enabled)
-                RebuildPreview();
+            if (!_enabled || _disposed)
+                return;
+
+            ScheduleDeferredPreviewRebuild();
+        }
+
+        void ScheduleDeferredPreviewRebuild()
+        {
+            // Sidebar / tray toggles fire many layout passes while geometry is still moving. Rebuilding synchronously
+            // can leave UITK repainting against stale state and look like a "screenshot of the window".
+            if (_deferredPreviewRebuildPending)
+                return;
+            _deferredPreviewRebuildPending = true;
+            EditorApplication.delayCall += OnDeferredPreviewRebuild;
+        }
+
+        void OnDeferredPreviewRebuild()
+        {
+            EditorApplication.delayCall -= OnDeferredPreviewRebuild;
+            _deferredPreviewRebuildPending = false;
+            if (_disposed || !_enabled)
+                return;
+            RebuildPreview();
         }
 
         void LoadSampleTextures()
@@ -159,11 +191,14 @@ namespace CorridorKey.Editor.UI
             _material.SetVector("_SplitNormal", new Vector4(normal.x, normal.y, 0f, 0f));
             _material.SetVector("_SplitViewportPx", new Vector4(width, height, 0f, 0f));
 
+            // Bind A explicitly: some Editor frames / layout passes leave _MainTex stale; Blit also sets it from source.
+            _material.SetTexture("_MainTex", _sourceA);
+
             // Source must be non-null (not the backbuffer). First argument also becomes _MainTex for this pass.
             Graphics.Blit(_sourceA, _renderTexture, _material, 0);
 
-            // Force UITK to pick up RT contents (first assign after enable can otherwise show stale framebuffer).
-            _image.image = null;
+            // Do not set image to null: clearing the Image makes UITK repaint with no texture and can sample the
+            // Editor window (looks like a "screenshot of itself") — especially when geometry fires often (QUEUE / FILES / PARAMETERS toggles).
             _image.image = _renderTexture;
             _image.MarkDirtyRepaint();
             _surface.MarkDirtyRepaint();
@@ -174,12 +209,10 @@ namespace CorridorKey.Editor.UI
             if (_renderTexture != null && _renderTexture.width == width && _renderTexture.height == height)
                 return;
 
-            if (_renderTexture != null)
-            {
-                _renderTexture.Release();
-                UnityEngine.Object.DestroyImmediate(_renderTexture);
-            }
-
+            // Create and bind the new RT before destroying the old one. If _image still pointed at a destroyed
+            // RenderTexture during a layout repaint (geometry thrash from QUEUE / FILES / PARAMETERS), UITK can
+            // fall back to sampling the panel/window and look like a "screenshot of itself".
+            var oldRt = _renderTexture;
             _renderTexture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32)
             {
                 wrapMode = TextureWrapMode.Clamp,
@@ -188,6 +221,18 @@ namespace CorridorKey.Editor.UI
                 name = "CorridorKey-AbGpuPreview"
             };
             _renderTexture.Create();
+
+            // Only point the Image at the new RT before destroying the previous one. On first allocation there is
+            // no old RT — assigning here (before Blit) repaints with an empty RT and brings back the first-open
+            // "window screenshot" artifact; RebuildPreview assigns after Graphics.Blit in that case.
+            if (oldRt != null)
+                _image.image = _renderTexture;
+
+            if (oldRt != null)
+            {
+                oldRt.Release();
+                UnityEngine.Object.DestroyImmediate(oldRt);
+            }
         }
 
         void UpdateHintVisibility()
