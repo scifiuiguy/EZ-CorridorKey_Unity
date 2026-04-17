@@ -11,6 +11,13 @@ namespace CorridorKey.Editor.UI
     /// </summary>
     public sealed class ParametersRailController
     {
+        /// <summary>Which auto alpha-hint pipeline the user expects for <c>AlphaHint/</c> (mutually exclusive radios).</summary>
+        public enum AutoAlphaHintSource
+        {
+            Gvm,
+            BiRefNet,
+        }
+
         /// <summary>Collapsed: chevron right (more to reveal). Expanded: chevron down (section open).</summary>
         const string AdvancedCollapsed = "Advanced \u25B6";
 
@@ -42,6 +49,8 @@ namespace CorridorKey.Editor.UI
         readonly Button _importToggleBtn;
         readonly VisualElement _drawPanel;
         readonly VisualElement _importPanel;
+        readonly RadioButton _radioGvm;
+        readonly RadioButton _radioBirefNet;
         readonly Button _gvmAutoBtn;
         readonly Button _birefNetBtn;
         readonly DropdownField _birefNetDropdown;
@@ -65,6 +74,12 @@ namespace CorridorKey.Editor.UI
         bool _outputExpanded;
         bool _performanceExpanded;
 
+        bool _suppressAlphaHintRadioSync;
+
+        /// <summary>Reflects the GVM vs BiRefNet radio — which method the UI treats as authoritative for AlphaHint.</summary>
+        public AutoAlphaHintSource SelectedAutoAlphaHintSource =>
+            _radioGvm.value ? AutoAlphaHintSource.Gvm : AutoAlphaHintSource.BiRefNet;
+
         public ParametersRailController(VisualElement root)
         {
             _modeAutoBtn = root.Q<Button>("parameters-toggle-auto")
@@ -87,6 +102,10 @@ namespace CorridorKey.Editor.UI
                          ?? throw new System.InvalidOperationException("parameters-guided-draw");
             _importPanel = root.Q<VisualElement>("parameters-guided-import")
                            ?? throw new System.InvalidOperationException("parameters-guided-import");
+            _radioGvm = root.Q<RadioButton>("parameters-alpha-hint-radio-gvm")
+                        ?? throw new System.InvalidOperationException("parameters-alpha-hint-radio-gvm");
+            _radioBirefNet = root.Q<RadioButton>("parameters-alpha-hint-radio-birefnet")
+                             ?? throw new System.InvalidOperationException("parameters-alpha-hint-radio-birefnet");
             _gvmAutoBtn = root.Q<Button>("parameters-gvm-btn")
                           ?? throw new System.InvalidOperationException("parameters-gvm-btn");
             _birefNetBtn = root.Q<Button>("parameters-birefnet-btn")
@@ -122,6 +141,8 @@ namespace CorridorKey.Editor.UI
             _modeGuidedBtn.clicked += OnModeGuidedClicked;
             _drawToggleBtn.clicked += OnDrawClicked;
             _importToggleBtn.clicked += OnImportClicked;
+            _radioGvm.RegisterValueChangedCallback(OnAlphaHintRadioGvmChanged);
+            _radioBirefNet.RegisterValueChangedCallback(OnAlphaHintRadioBirefChanged);
             _gvmAutoBtn.clicked += OnGvmAutoClicked;
             _birefNetBtn.clicked += OnBiRefNetClicked;
             _birefNetDropdown.RegisterValueChangedCallback(OnBiRefNetDropdownChanged);
@@ -175,18 +196,68 @@ namespace CorridorKey.Editor.UI
             Debug.Log("[CorridorKey] VIDEOMAMA selected.");
         }
 
-        void OnGvmAutoClicked()
+        void OnAlphaHintRadioGvmChanged(ChangeEvent<bool> evt)
+        {
+            if (_suppressAlphaHintRadioSync)
+                return;
+            if (!evt.newValue)
+                return;
+            ApplyAlphaHintSource(true);
+            ActivateGvmAlphaHint();
+        }
+
+        void OnAlphaHintRadioBirefChanged(ChangeEvent<bool> evt)
+        {
+            if (_suppressAlphaHintRadioSync)
+                return;
+            if (!evt.newValue)
+                return;
+            ApplyAlphaHintSource(false);
+            ActivateBiRefNetAlphaHint();
+        }
+
+        /// <summary>Sets the GVM vs BiRefNet radios (BiRefNet is default).</summary>
+        void ApplyAlphaHintSource(bool gvmSelected)
+        {
+            _suppressAlphaHintRadioSync = true;
+            try
+            {
+                _radioGvm.SetValueWithoutNotify(gvmSelected);
+                _radioBirefNet.SetValueWithoutNotify(!gvmSelected);
+            }
+            finally
+            {
+                _suppressAlphaHintRadioSync = false;
+            }
+        }
+
+        /// <summary>Same work as clicking GVM AUTO (bridge hook).</summary>
+        void ActivateGvmAlphaHint()
         {
             Debug.Log("[CorridorKey] GVM AUTO clicked.");
         }
 
-        void OnBiRefNetClicked()
+        /// <summary>Same work as clicking BIREFNET (bridge hook).</summary>
+        void ActivateBiRefNetAlphaHint()
         {
             Debug.Log($"[CorridorKey] BIREFNET clicked. Model: {_birefNetDropdown.value}");
         }
 
+        void OnGvmAutoClicked()
+        {
+            ApplyAlphaHintSource(true);
+            ActivateGvmAlphaHint();
+        }
+
+        void OnBiRefNetClicked()
+        {
+            ApplyAlphaHintSource(false);
+            ActivateBiRefNetAlphaHint();
+        }
+
         void OnBiRefNetDropdownChanged(ChangeEvent<string> evt)
         {
+            ApplyAlphaHintSource(false);
             Debug.Log($"[CorridorKey] OnBiRefNetDropdownChanged: {evt.newValue}");
         }
 

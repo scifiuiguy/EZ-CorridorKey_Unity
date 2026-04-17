@@ -28,18 +28,6 @@ namespace CorridorKey.Editor.UI
         /// <summary>EZ <c>_CONTENT_W</c>.</summary>
         public const float QueueContentWidthPx = 216f;
 
-        /// <summary>
-        /// Fallback height for <c>parameters-inference-section</c> when computing the ALPHA <see cref="ScrollView"/>
-        /// height cap before the section has a measured layout height (first pass).
-        /// </summary>
-        public const float ParametersInferenceSectionReservePx = 300f;
-
-        /// <summary>Fallback height for <c>parameters-output-section</c> before first layout (ALPHA scroll cap).</summary>
-        public const float ParametersOutputSectionReservePx = 140f;
-
-        /// <summary>Fallback height for <c>parameters-performance-section</c> before first layout (ALPHA scroll cap).</summary>
-        public const float ParametersPerformanceSectionReservePx = 56f;
-
         /// <summary>EZ <c>_EXPANDED_W</c> = tab + content.</summary>
         public const float QueueExpandedWidthPx = QueueTabWidthPx + QueueContentWidthPx;
 
@@ -332,7 +320,7 @@ namespace CorridorKey.Editor.UI
             parametersShell.style.flexShrink = 0;
             parametersShell.style.flexGrow = 0;
             parametersShell.style.alignItems = Align.Stretch;
-            // Hidden clipped INFERENCE / test bands below ALPHA; Visible lets the column stack show (may extend past shell).
+            // Scrollable content lives in parameters-scroll inside parameters-rail; shell is rail + tab strip.
             parametersShell.style.overflow = Overflow.Visible;
             parametersShell.style.marginLeft = 8f;
             parametersShell.style.width = ParametersExpandedWidthPx;
@@ -382,14 +370,13 @@ namespace CorridorKey.Editor.UI
             parametersRail.style.borderLeftWidth = 1f;
             parametersRail.style.borderLeftColor = new Color(0.35f, 0.35f, 0.35f);
             parametersRail.style.flexDirection = FlexDirection.Column;
+            parametersRail.style.alignItems = Align.Stretch;
 
-            // Flat stack (no outer ScrollView): UITK ScrollView was not exposing siblings below ALPHA in the viewport.
             var railStack = new VisualElement { name = "parameters-rail-stack" };
             railStack.style.flexDirection = FlexDirection.Column;
             railStack.style.alignItems = Align.Stretch;
-            railStack.style.flexGrow = 1;
-            railStack.style.flexShrink = 1;
-            railStack.style.minHeight = 0;
+            railStack.style.flexGrow = 0;
+            railStack.style.flexShrink = 0;
 
             var alphaSection = new VisualElement { name = "parameters-alpha-section" };
             StyleParametersRailBandedSection(alphaSection);
@@ -409,13 +396,7 @@ namespace CorridorKey.Editor.UI
             parametersAlphaBody.style.flexShrink = 0;
             parametersAlphaBody.style.display = DisplayStyle.None;
 
-            var scroll = new ScrollView { name = "parameters-scroll" };
-            scroll.style.flexGrow = 0;
-            scroll.style.flexShrink = 0;
-
-            BuildParametersRailScrollContent(scroll);
-
-            parametersAlphaBody.Add(scroll);
+            BuildParametersAlphaGenerationContent(parametersAlphaBody);
             alphaSection.Add(parametersAlphaToggle);
             alphaSection.Add(parametersAlphaBody);
 
@@ -427,23 +408,13 @@ namespace CorridorKey.Editor.UI
             railStack.Add(inferenceSection);
             railStack.Add(outputSection);
             railStack.Add(performanceSection);
-            parametersRail.Add(railStack);
 
-            void SyncAlphaScrollViewport()
-            {
-                SyncParametersAlphaScrollViewport(scroll, parametersShell, parametersRail, parametersAlphaToggle);
-            }
-
-            parametersRail.RegisterCallback<GeometryChangedEvent>(_ => SyncAlphaScrollViewport());
-            parametersShell.RegisterCallback<GeometryChangedEvent>(_ => SyncAlphaScrollViewport());
-            parametersAlphaBody.RegisterCallback<GeometryChangedEvent>(_ => SyncAlphaScrollViewport());
-            var railRoot = scroll.Q<VisualElement>("parameters-rail-root");
-            if (railRoot != null)
-                railRoot.RegisterCallback<GeometryChangedEvent>(_ => SyncAlphaScrollViewport());
-            inferenceSection.RegisterCallback<GeometryChangedEvent>(_ => SyncAlphaScrollViewport());
-            outputSection.RegisterCallback<GeometryChangedEvent>(_ => SyncAlphaScrollViewport());
-            performanceSection.RegisterCallback<GeometryChangedEvent>(_ => SyncAlphaScrollViewport());
-            parametersRail.schedule.Execute(SyncAlphaScrollViewport).ExecuteLater(0);
+            var parametersScroll = new ScrollView { name = "parameters-scroll" };
+            parametersScroll.style.flexGrow = 1;
+            parametersScroll.style.flexShrink = 1;
+            parametersScroll.style.minHeight = 0;
+            parametersScroll.Add(railStack);
+            parametersRail.Add(parametersScroll);
 
             // Content first, tab last — tab sits on the far right (queue tab sits on the far left of its strip).
             parametersShell.Add(parametersRail);
@@ -804,71 +775,11 @@ namespace CorridorKey.Editor.UI
         }
 
         /// <summary>
-        /// Sizes the alpha-rail <see cref="ScrollView"/> to the measured content height, capped so the bordered
-        /// ALPHA block does not stretch to fill the rail; internal scrolling appears when content exceeds the cap.
+        /// ALPHA section body: Auto vs Guided (see <c>ALPHA_GENERATION_UI_IMPROVEMENTS.md</c>), Advanced (GVM or BiRefNet),
+        /// Guided Draw (Track mask → MatAnyone vs VideoMaMa) or Import. Lives inside <c>parameters-rail-root</c>; the whole
+        /// parameters rail (ALPHA + INFERENCE + OUTPUT + PERFORMANCE) scrolls in <c>parameters-scroll</c>.
         /// </summary>
-        static void SyncParametersAlphaScrollViewport(
-            ScrollView innerAlphaScroll,
-            VisualElement parametersShell,
-            VisualElement parametersRail,
-            VisualElement parametersAlphaTitle)
-        {
-            var root = innerAlphaScroll.Q<VisualElement>("parameters-rail-root");
-            if (root == null)
-                return;
-
-            // Use shell height (stretches with viewer row); rail alone can be 0 before first layout.
-            var railH = parametersShell.layout.height >= 1f && !float.IsNaN(parametersShell.layout.height)
-                ? parametersShell.layout.height
-                : parametersRail.layout.height;
-            if (railH < 32f || float.IsNaN(railH) || float.IsInfinity(railH))
-                return;
-            // Shell is row[rail | tab]; rail column height matches shell minus small fudge for tab alignment.
-            railH -= 2f;
-
-            var titleH = parametersAlphaTitle.layout.height >= 1f ? parametersAlphaTitle.layout.height : 18f;
-            var inference = parametersRail.Q<VisualElement>("parameters-inference-section");
-            float inferenceH;
-            if (inference != null && inference.layout.height >= 1f && !float.IsNaN(inference.layout.height))
-                inferenceH = inference.layout.height;
-            else
-                inferenceH = ParametersInferenceSectionReservePx;
-
-            var output = parametersRail.Q<VisualElement>("parameters-output-section");
-            float outputH;
-            if (output != null && output.layout.height >= 1f && !float.IsNaN(output.layout.height))
-                outputH = output.layout.height;
-            else
-                outputH = ParametersOutputSectionReservePx;
-
-            var performance = parametersRail.Q<VisualElement>("parameters-performance-section");
-            float performanceH;
-            if (performance != null && performance.layout.height >= 1f && !float.IsNaN(performance.layout.height))
-                performanceH = performance.layout.height;
-            else
-                performanceH = ParametersPerformanceSectionReservePx;
-
-            const float chromeReserve = 40f;
-            var rawMax = railH - titleH - chromeReserve - inferenceH - outputH - performanceH;
-            // Do not use Mathf.Max(120, …): when the rail is short that steals space from INFERENCE. Allow tight caps.
-            var maxViewport = Mathf.Max(0f, rawMax);
-            if (maxViewport < 1f && root.layout.height >= 1f)
-                maxViewport = Mathf.Min(root.layout.height, 160f);
-
-            var contentH = root.layout.height;
-            if (contentH < 1f || float.IsNaN(contentH) || float.IsInfinity(contentH))
-                return;
-
-            var viewport = Mathf.Min(contentH, maxViewport);
-            innerAlphaScroll.style.height = viewport;
-            innerAlphaScroll.style.maxHeight = maxViewport;
-        }
-
-        /// <summary>
-        /// Unity parameters rail: Auto vs Guided (see <c>ALPHA_GENERATION_UI_IMPROVEMENTS.md</c>), Advanced GVM/BiRefNet,
-        /// Guided Draw (Track mask → MatAnyone vs VideoMaMa) or Import.
-        /// </summary>
-        static void BuildParametersRailScrollContent(ScrollView scroll)
+        static void BuildParametersAlphaGenerationContent(VisualElement host)
         {
             var root = new VisualElement { name = "parameters-rail-root" };
             root.style.flexDirection = FlexDirection.Column;
@@ -929,15 +840,39 @@ namespace CorridorKey.Editor.UI
             advancedBody.style.borderLeftColor = new Color(0.35f, 0.34f, 0.2f, 1f);
             advancedBody.style.marginBottom = 4f;
 
+            var radioGvm = new RadioButton { name = "parameters-alpha-hint-radio-gvm" };
+            radioGvm.value = false;
+            radioGvm.tooltip =
+                "AlphaHint is treated as coming from GVM. Recommendation and VRAM guidance match the GVM AUTO button (see its tooltip).";
+            StyleParamRailAlphaHintRadio(radioGvm);
+
             var gvmBtn = new Button { text = "GVM AUTO" };
             gvmBtn.name = "parameters-gvm-btn";
             gvmBtn.SetEnabled(true);
             gvmBtn.tooltip =
-                "Auto-generate alpha hint for the entire clip.\n"
-                + "Uses GVM to predict foreground/background separation.\n"
-                + "Available when clip is in RAW state (frames extracted).";
-            gvmBtn.style.marginBottom = 6f;
+                "Recommendation: Use when you want GVM’s full generative matting — strong on green screen "
+                + "and people. Slower and heavier than BiRefNet; prefer BiRefNet first for speed or lower VRAM "
+                + "unless you specifically want this pipeline.\n\n"
+                + "Auto-generates an alpha hint for the entire clip (foreground/background separation). "
+                + "Available when the clip is RAW (frames extracted).\n\n"
+                + "VRAM (approximate, NVIDIA CUDA): typically about 8–12 GB at HD-class settings (batch size 1); "
+                + "plan for about 12–16 GB or more headroom at higher resolutions or if batch size is increased.";
             StyleParamRailCtaButton(gvmBtn);
+
+            var gvmRow = new VisualElement { name = "parameters-gvm-row" };
+            gvmRow.style.flexDirection = FlexDirection.Row;
+            gvmRow.style.alignItems = Align.Center;
+            gvmRow.style.marginBottom = 4f;
+            gvmRow.style.flexShrink = 0;
+            gvmBtn.style.flexGrow = 1;
+            gvmRow.Add(radioGvm);
+            gvmRow.Add(gvmBtn);
+
+            var radioBiref = new RadioButton { name = "parameters-alpha-hint-radio-birefnet" };
+            radioBiref.value = true;
+            radioBiref.tooltip =
+                "AlphaHint is treated as coming from BiRefNet (default). Recommendation and VRAM guidance match the BIREFNET button (see its tooltip).";
+            StyleParamRailAlphaHintRadio(radioBiref);
 
             var birefRow = new VisualElement { name = "parameters-birefnet-row" };
             birefRow.style.flexDirection = FlexDirection.Row;
@@ -948,13 +883,14 @@ namespace CorridorKey.Editor.UI
             birefBtn.name = "parameters-birefnet-btn";
             birefBtn.SetEnabled(true);
             birefBtn.tooltip =
-                "Auto-generate alpha hint using BiRefNet.\n"
-                + "Fully automatic — no painting or annotation needed.\n"
-                + "Downloads the selected model variant on first use.\n\n"
-                + "Matting: Best for hair/transparency detail (recommended).\n"
-                + "Portrait: Optimized for human close-ups.\n"
-                + "General: Balanced foreground/background separation.\n"
-                + "HR variants: For 2K/4K footage (uses more VRAM).";
+                "Recommendation: Default choice for most clips — usually faster and more VRAM-friendly than GVM, "
+                + "with strong edges and hair (start with Matting).\n\n"
+                + "Fully automatic; downloads the selected model variant on first use.\n\n"
+                + "Variants: Matting — hair and transparency (good default). Portrait — human close-ups. "
+                + "General — balanced separation. HR, 2K, Lite, and Dynamic names indicate resolution/speed tradeoffs "
+                + "(larger / HR variants need more VRAM).\n\n"
+                + "VRAM (approximate, NVIDIA CUDA): Standard or Lite models often about 4–8 GB; "
+                + "HR, 2K, or full-frame dynamic variants commonly about 8–14 GB or more depending on input size.";
             birefBtn.style.flexGrow = 1;
             birefBtn.style.marginRight = 4f;
             StyleParamRailCtaButton(birefBtn);
@@ -967,12 +903,17 @@ namespace CorridorKey.Editor.UI
             birefModel.style.flexGrow = 1;
             birefModel.style.minWidth = 120f;
             birefModel.SetEnabled(true);
-            birefModel.tooltip = "BiRefNet model variant — changes take effect on next run (EZ <c>BIREFNET_MODELS</c>).";
+            birefModel.tooltip =
+                "BiRefNet model variant (EZ BIREFNET_MODELS). Takes effect on the next run.\n\n"
+                + "VRAM guide: Lite and smaller General/Matting checkpoints are the lightest (often about 4–8 GB). "
+                + "Matting HR, General HR, 2K, and Dynamic variants are heavier (often about 8–14 GB or more at high resolution).";
 
+            birefRow.Add(radioBiref);
             birefRow.Add(birefBtn);
             birefRow.Add(birefModel);
 
-            advancedBody.Add(gvmBtn);
+            advancedBody.Add(gvmRow);
+            advancedBody.Add(CreateParametersOrVerticalLabel("parameters-gvm-birefnet-or"));
             advancedBody.Add(birefRow);
 
             autoPanel.Add(autoSummary);
@@ -1133,7 +1074,7 @@ namespace CorridorKey.Editor.UI
             root.Add(autoPanel);
             root.Add(guidedPanel);
 
-            scroll.Add(root);
+            host.Add(root);
         }
 
         static void StyleParamRailCtaButton(Button btn)
@@ -1141,6 +1082,13 @@ namespace CorridorKey.Editor.UI
             btn.style.minHeight = 22f;
             btn.style.fontSize = 10;
             btn.style.unityFontStyleAndWeight = FontStyle.Bold;
+        }
+
+        static void StyleParamRailAlphaHintRadio(RadioButton rb)
+        {
+            rb.style.flexShrink = 0;
+            rb.style.marginRight = 4f;
+            rb.style.alignSelf = Align.Center;
         }
 
         static void StyleParamChromeToggleButton(Button btn, float marginLeft)
@@ -1161,6 +1109,22 @@ namespace CorridorKey.Editor.UI
             or.style.color = new Color(0.5f, 0.49f, 0.44f, 1f);
             or.style.marginLeft = 6f;
             or.style.marginRight = 6f;
+            or.style.flexShrink = 0;
+            return or;
+        }
+
+        /// <summary>Stacked "OR" between alternatives (e.g. GVM vs BiRefNet in the Advanced block).</summary>
+        static Label CreateParametersOrVerticalLabel(string name)
+        {
+            var or = new Label("OR");
+            or.name = name;
+            or.pickingMode = PickingMode.Ignore;
+            or.style.fontSize = 10;
+            or.style.unityFontStyleAndWeight = FontStyle.Bold;
+            or.style.color = new Color(0.5f, 0.49f, 0.44f, 1f);
+            or.style.marginTop = 2f;
+            or.style.marginBottom = 4f;
+            or.style.alignSelf = Align.Center;
             or.style.flexShrink = 0;
             return or;
         }
