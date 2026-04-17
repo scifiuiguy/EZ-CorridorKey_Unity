@@ -17,8 +17,8 @@ namespace CorridorKey.Editor.UI
         /// <summary>EZ parameters column width (content only; tab is extra).</summary>
         public const float ParametersRailWidthPx = 280f;
 
-        /// <summary>Unity-only vertical tab — same width as <see cref="QueueTabWidthPx"/>.</summary>
-        public const float ParametersTabWidthPx = 24f;
+        /// <summary>Unity-only vertical tab (slightly wider than queue tab so <c>&amp;</c> fits).</summary>
+        public const float ParametersTabWidthPx = 26f;
 
         public const float ParametersExpandedWidthPx = ParametersTabWidthPx + ParametersRailWidthPx;
 
@@ -27,6 +27,18 @@ namespace CorridorKey.Editor.UI
 
         /// <summary>EZ <c>_CONTENT_W</c>.</summary>
         public const float QueueContentWidthPx = 216f;
+
+        /// <summary>
+        /// Fallback height for <c>parameters-inference-section</c> when computing the ALPHA <see cref="ScrollView"/>
+        /// height cap before the section has a measured layout height (first pass).
+        /// </summary>
+        public const float ParametersInferenceSectionReservePx = 300f;
+
+        /// <summary>Fallback height for <c>parameters-output-section</c> before first layout (ALPHA scroll cap).</summary>
+        public const float ParametersOutputSectionReservePx = 140f;
+
+        /// <summary>Fallback height for <c>parameters-performance-section</c> before first layout (ALPHA scroll cap).</summary>
+        public const float ParametersPerformanceSectionReservePx = 56f;
 
         /// <summary>EZ <c>_EXPANDED_W</c> = tab + content.</summary>
         public const float QueueExpandedWidthPx = QueueTabWidthPx + QueueContentWidthPx;
@@ -231,6 +243,7 @@ namespace CorridorKey.Editor.UI
             row.style.flexShrink = 1;
             row.style.minWidth = 0;
             row.style.minHeight = 180f;
+            row.style.alignItems = Align.Stretch;
 
             var viewerColumn = new VisualElement { name = "viewer-column" };
             viewerColumn.style.flexDirection = FlexDirection.Column;
@@ -277,7 +290,8 @@ namespace CorridorKey.Editor.UI
             parametersShell.style.flexShrink = 0;
             parametersShell.style.flexGrow = 0;
             parametersShell.style.alignItems = Align.Stretch;
-            parametersShell.style.overflow = Overflow.Hidden;
+            // Hidden clipped INFERENCE / test bands below ALPHA; Visible lets the column stack show (may extend past shell).
+            parametersShell.style.overflow = Overflow.Visible;
             parametersShell.style.marginLeft = 8f;
             parametersShell.style.width = ParametersExpandedWidthPx;
 
@@ -292,8 +306,19 @@ namespace CorridorKey.Editor.UI
             parametersTab.style.borderLeftWidth = 1f;
             parametersTab.style.borderLeftColor = new Color(0.28f, 0.28f, 0.28f);
 
-            foreach (var ch in "ALPHA")
+            const string parametersTabVerticalTitle = "PARAMETERS";
+            foreach (var ch in parametersTabVerticalTitle)
             {
+                if (ch == ' ')
+                {
+                    var spacer = new VisualElement();
+                    spacer.pickingMode = PickingMode.Ignore;
+                    spacer.style.height = 4f;
+                    spacer.style.flexShrink = 0;
+                    parametersTab.Add(spacer);
+                    continue;
+                }
+
                 var letter = new Label(ch.ToString());
                 letter.pickingMode = PickingMode.Ignore;
                 letter.style.fontSize = 11;
@@ -316,20 +341,67 @@ namespace CorridorKey.Editor.UI
             parametersRail.style.borderLeftColor = new Color(0.35f, 0.35f, 0.35f);
             parametersRail.style.flexDirection = FlexDirection.Column;
 
-            var parametersTitle = new Label("Alpha Generation Parameters");
-            parametersTitle.style.unityFontStyleAndWeight = FontStyle.Bold;
-            parametersTitle.style.fontSize = 11;
-            parametersTitle.style.marginBottom = 4f;
-            parametersTitle.style.flexShrink = 0;
+            // Flat stack (no outer ScrollView): UITK ScrollView was not exposing siblings below ALPHA in the viewport.
+            var railStack = new VisualElement { name = "parameters-rail-stack" };
+            railStack.style.flexDirection = FlexDirection.Column;
+            railStack.style.alignItems = Align.Stretch;
+            railStack.style.flexGrow = 1;
+            railStack.style.flexShrink = 1;
+            railStack.style.minHeight = 0;
+
+            var alphaSection = new VisualElement { name = "parameters-alpha-section" };
+            StyleParametersRailBandedSection(alphaSection);
+
+            var parametersAlphaToggle = new Button { text = "ALPHA \u25B6" };
+            parametersAlphaToggle.name = "parameters-alpha-section-toggle";
+            parametersAlphaToggle.AddToClassList("corridor-key-param-advanced-toggle");
+            parametersAlphaToggle.style.alignSelf = Align.FlexStart;
+            parametersAlphaToggle.style.marginBottom = 4f;
+            parametersAlphaToggle.style.flexShrink = 0;
+            parametersAlphaToggle.tooltip = "Show or hide alpha generation parameters.";
+
+            var parametersAlphaBody = new VisualElement { name = "parameters-alpha-body" };
+            parametersAlphaBody.style.flexDirection = FlexDirection.Column;
+            parametersAlphaBody.style.alignItems = Align.Stretch;
+            parametersAlphaBody.style.flexGrow = 0;
+            parametersAlphaBody.style.flexShrink = 0;
+            parametersAlphaBody.style.display = DisplayStyle.None;
 
             var scroll = new ScrollView { name = "parameters-scroll" };
-            scroll.style.flexGrow = 1;
-            scroll.style.minHeight = 0;
+            scroll.style.flexGrow = 0;
+            scroll.style.flexShrink = 0;
 
             BuildParametersRailScrollContent(scroll);
 
-            parametersRail.Add(parametersTitle);
-            parametersRail.Add(scroll);
+            parametersAlphaBody.Add(scroll);
+            alphaSection.Add(parametersAlphaToggle);
+            alphaSection.Add(parametersAlphaBody);
+
+            var inferenceSection = BuildParametersInferenceSection();
+            var outputSection = BuildParametersOutputSection();
+            var performanceSection = BuildParametersPerformanceSection();
+
+            railStack.Add(alphaSection);
+            railStack.Add(inferenceSection);
+            railStack.Add(outputSection);
+            railStack.Add(performanceSection);
+            parametersRail.Add(railStack);
+
+            void SyncAlphaScrollViewport()
+            {
+                SyncParametersAlphaScrollViewport(scroll, parametersShell, parametersRail, parametersAlphaToggle);
+            }
+
+            parametersRail.RegisterCallback<GeometryChangedEvent>(_ => SyncAlphaScrollViewport());
+            parametersShell.RegisterCallback<GeometryChangedEvent>(_ => SyncAlphaScrollViewport());
+            parametersAlphaBody.RegisterCallback<GeometryChangedEvent>(_ => SyncAlphaScrollViewport());
+            var railRoot = scroll.Q<VisualElement>("parameters-rail-root");
+            if (railRoot != null)
+                railRoot.RegisterCallback<GeometryChangedEvent>(_ => SyncAlphaScrollViewport());
+            inferenceSection.RegisterCallback<GeometryChangedEvent>(_ => SyncAlphaScrollViewport());
+            outputSection.RegisterCallback<GeometryChangedEvent>(_ => SyncAlphaScrollViewport());
+            performanceSection.RegisterCallback<GeometryChangedEvent>(_ => SyncAlphaScrollViewport());
+            parametersRail.schedule.Execute(SyncAlphaScrollViewport).ExecuteLater(0);
 
             // Content first, tab last — tab sits on the far right (queue tab sits on the far left of its strip).
             parametersShell.Add(parametersRail);
@@ -342,6 +414,415 @@ namespace CorridorKey.Editor.UI
         }
 
         /// <summary>
+        /// Banded border/padding shared by parameters rail blocks (ALPHA, INFERENCE, OUTPUT, PERFORMANCE).
+        /// </summary>
+        static void StyleParametersRailBandedSection(VisualElement section)
+        {
+            section.style.flexDirection = FlexDirection.Column;
+            section.style.alignItems = Align.Stretch;
+            section.style.flexGrow = 0;
+            section.style.flexShrink = 0;
+            section.style.paddingTop = 6f;
+            section.style.paddingBottom = 6f;
+            section.style.paddingLeft = 6f;
+            section.style.paddingRight = 6f;
+            section.style.marginBottom = 6f;
+            var edge = new Color(0.42f, 0.41f, 0.36f, 1f);
+            section.style.borderTopWidth = 1f;
+            section.style.borderRightWidth = 1f;
+            section.style.borderBottomWidth = 1f;
+            section.style.borderLeftWidth = 1f;
+            section.style.borderTopColor = edge;
+            section.style.borderRightColor = edge;
+            section.style.borderBottomColor = edge;
+            section.style.borderLeftColor = edge;
+            section.style.borderTopLeftRadius = 2f;
+            section.style.borderTopRightRadius = 2f;
+            section.style.borderBottomLeftRadius = 2f;
+            section.style.borderBottomRightRadius = 2f;
+        }
+
+        /// <summary>
+        /// EZ <c>parameter_panel.py</c> INFERENCE <c>QGroupBox</c> — controls only; handlers wire in <see cref="InferenceSectionController"/>.
+        /// </summary>
+        static VisualElement BuildParametersInferenceSection()
+        {
+            var section = new VisualElement { name = "parameters-inference-section" };
+            StyleParametersRailBandedSection(section);
+
+            var muted = new Color(0.63f, 0.62f, 0.56f, 1f);
+
+            var sectionTitle = new Button { text = "INFERENCE \u25B6" };
+            sectionTitle.name = "parameters-inference-section-toggle";
+            sectionTitle.AddToClassList("corridor-key-param-advanced-toggle");
+            sectionTitle.style.alignSelf = Align.FlexStart;
+            sectionTitle.style.marginBottom = 4f;
+            sectionTitle.style.flexShrink = 0;
+            sectionTitle.tooltip = "Show or hide inference parameters.";
+
+            var inferenceBody = new VisualElement { name = "parameters-inference-body" };
+            inferenceBody.style.flexDirection = FlexDirection.Column;
+            inferenceBody.style.alignItems = Align.Stretch;
+            inferenceBody.style.flexGrow = 0;
+            inferenceBody.style.flexShrink = 0;
+            inferenceBody.style.display = DisplayStyle.None;
+
+            var colorRow = new VisualElement { name = "parameters-inference-color-row" };
+            colorRow.style.flexDirection = FlexDirection.Row;
+            colorRow.style.alignItems = Align.Center;
+            colorRow.style.marginBottom = 6f;
+            colorRow.style.flexShrink = 0;
+
+            var colorLabel = new Label("Color Space");
+            colorLabel.name = "parameters-inference-color-space-label";
+            colorLabel.style.width = 80f;
+            colorLabel.style.flexShrink = 0;
+            colorLabel.style.fontSize = 10;
+            colorLabel.style.color = muted;
+            colorLabel.tooltip =
+                "How CorridorKey interprets the source before inference.\n"
+                + "sRGB: typical video and 8-bit imagery.\n"
+                + "Linear: linear-light EXR / CG plates.";
+
+            var colorDropdown = new DropdownField(new List<string> { "sRGB", "Linear" }, 0);
+            colorDropdown.name = "parameters-inference-color-space";
+            colorDropdown.label = string.Empty;
+            colorDropdown.style.flexGrow = 1;
+            colorDropdown.style.minHeight = 22f;
+            colorDropdown.tooltip = colorLabel.tooltip;
+
+            colorRow.Add(colorLabel);
+            colorRow.Add(colorDropdown);
+
+            var despillLabel = new Label("Despill: 0.5");
+            despillLabel.name = "parameters-inference-despill-label";
+            despillLabel.style.fontSize = 10;
+            despillLabel.style.color = muted;
+            despillLabel.style.marginBottom = 2f;
+            despillLabel.style.flexShrink = 0;
+            despillLabel.tooltip =
+                "Green spill removal strength (0.0–1.0).\n"
+                + "1.0 = full despill, 0.0 = no despill.";
+
+            var despillSlider = new Slider(string.Empty, 0f, 10f, SliderDirection.Horizontal)
+            {
+                value = 5f
+            };
+            despillSlider.name = "parameters-inference-despill-slider";
+            despillSlider.showInputField = false;
+            despillSlider.style.flexGrow = 1;
+            despillSlider.style.minHeight = 18f;
+            despillSlider.style.marginBottom = 8f;
+            despillSlider.tooltip = despillLabel.tooltip;
+
+            var despeckleRow = new VisualElement { name = "parameters-inference-despeckle-row" };
+            despeckleRow.style.flexDirection = FlexDirection.Row;
+            despeckleRow.style.alignItems = Align.Center;
+            despeckleRow.style.marginBottom = 8f;
+            despeckleRow.style.flexShrink = 0;
+
+            var despeckleToggle = new Toggle("Despeckle");
+            despeckleToggle.name = "parameters-inference-despeckle-toggle";
+            despeckleToggle.value = true;
+            despeckleToggle.style.flexGrow = 1;
+            despeckleToggle.style.fontSize = 10;
+            despeckleToggle.tooltip =
+                "Remove isolated alpha islands smaller than the threshold (pixels).";
+
+            var despecklePx = new IntegerField { value = 400 };
+            despecklePx.name = "parameters-inference-despeckle-px";
+            despecklePx.label = string.Empty;
+            despecklePx.style.width = 72f;
+            despecklePx.style.flexShrink = 0;
+            despecklePx.style.marginLeft = 6f;
+            despecklePx.tooltip = "Minimum area (px) for a region to survive despeckle.";
+            despecklePx.isDelayed = false;
+
+            despeckleRow.Add(despeckleToggle);
+            despeckleRow.Add(despecklePx);
+
+            var refinerLabel = new Label("Refiner: 1.0");
+            refinerLabel.name = "parameters-inference-refiner-label";
+            refinerLabel.style.fontSize = 10;
+            refinerLabel.style.color = muted;
+            refinerLabel.style.marginBottom = 2f;
+            refinerLabel.style.flexShrink = 0;
+            refinerLabel.tooltip =
+                "Edge refinement (0.0–3.0).\n"
+                + "1.0 = default, 0.0 = backbone only.";
+
+            var refinerSlider = new Slider(string.Empty, 0f, 30f, SliderDirection.Horizontal)
+            {
+                value = 10f
+            };
+            refinerSlider.name = "parameters-inference-refiner-slider";
+            refinerSlider.showInputField = false;
+            refinerSlider.style.flexGrow = 1;
+            refinerSlider.style.minHeight = 18f;
+            refinerSlider.style.marginBottom = 8f;
+            refinerSlider.tooltip = refinerLabel.tooltip;
+
+            var livePreview = new Toggle("Live Preview");
+            livePreview.name = "parameters-inference-live-preview";
+            livePreview.value = true;
+            livePreview.style.fontSize = 10;
+            livePreview.style.flexShrink = 0;
+            livePreview.tooltip =
+                "Reprocess the current frame when inference parameters change (when a clip is ready).";
+
+            inferenceBody.Add(colorRow);
+            inferenceBody.Add(despillLabel);
+            inferenceBody.Add(despillSlider);
+            inferenceBody.Add(despeckleRow);
+            inferenceBody.Add(refinerLabel);
+            inferenceBody.Add(refinerSlider);
+            inferenceBody.Add(livePreview);
+
+            section.Add(sectionTitle);
+            section.Add(inferenceBody);
+
+            return section;
+        }
+
+        /// <summary>
+        /// EZ <c>parameter_panel.py</c> OUTPUT <c>QGroupBox</c> — channel toggles + format dropdowns; handlers wire in
+        /// <see cref="OutputPerformanceSectionController"/>.
+        /// </summary>
+        static VisualElement BuildParametersOutputSection()
+        {
+            var section = new VisualElement { name = "parameters-output-section" };
+            StyleParametersRailBandedSection(section);
+
+            var toggle = new Button { text = "OUTPUT \u25B6" };
+            toggle.name = "parameters-output-section-toggle";
+            toggle.AddToClassList("corridor-key-param-advanced-toggle");
+            toggle.style.alignSelf = Align.FlexStart;
+            toggle.style.marginBottom = 4f;
+            toggle.style.flexShrink = 0;
+            toggle.tooltip = "Show or hide output channel and format options.";
+
+            var body = new VisualElement { name = "parameters-output-body" };
+            body.style.flexDirection = FlexDirection.Column;
+            body.style.alignItems = Align.Stretch;
+            body.style.flexGrow = 0;
+            body.style.flexShrink = 0;
+            body.style.display = DisplayStyle.None;
+
+            body.Add(BuildOutputChannelRow(
+                "parameters-output-fg-row",
+                "FG",
+                "parameters-output-fg-toggle",
+                "parameters-output-fg-format",
+                new List<string> { "exr", "png" },
+                0,
+                "Foreground — despilled subject on black background.\n"
+                + "Green spill removed from hair and edges.\n"
+                + "Straight alpha (not premultiplied).",
+                "EXR = 32-bit float (post-production).\nPNG = 8-bit (general use)."));
+
+            body.Add(BuildOutputChannelRow(
+                "parameters-output-matte-row",
+                "Matte",
+                "parameters-output-matte-toggle",
+                "parameters-output-matte-format",
+                new List<string> { "exr", "png" },
+                0,
+                "Alpha matte — grayscale transparency map.\n"
+                + "White = fully opaque, black = fully transparent.\n"
+                + "Use in compositing software for manual keying control.",
+                "EXR = 32-bit float (post-production).\nPNG = 8-bit (general use)."));
+
+            body.Add(BuildOutputChannelRow(
+                "parameters-output-comp-row",
+                "Comp",
+                "parameters-output-comp-toggle",
+                "parameters-output-comp-format",
+                new List<string> { "png", "exr" },
+                0,
+                "Composite — final keyed result over checkerboard.\n"
+                + "Best representation of the key quality.\n"
+                + "Colors match the original input faithfully.",
+                "PNG = 8-bit with transparency.\nEXR = 32-bit float (post-production)."));
+
+            body.Add(BuildOutputChannelRow(
+                "parameters-output-processed-row",
+                "Processed",
+                "parameters-output-processed-toggle",
+                "parameters-output-processed-format",
+                new List<string> { "exr", "png" },
+                0,
+                "Processed — production-ready RGBA (straight, linear).\n"
+                + "Designed for import into Resolve, Premiere, and compositing tools.\n"
+                + "Includes despill + garbage matte cleanup applied.",
+                "EXR = 32-bit float (recommended for Processed).\nPNG = 8-bit (lossy for straight linear RGBA)."));
+
+            section.Add(toggle);
+            section.Add(body);
+            return section;
+        }
+
+        static VisualElement BuildOutputChannelRow(
+            string rowName,
+            string channelName,
+            string toggleName,
+            string formatName,
+            List<string> formatChoices,
+            int defaultFormatIndex,
+            string toggleTooltip,
+            string formatTooltip)
+        {
+            var row = new VisualElement { name = rowName };
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.alignItems = Align.Center;
+            row.style.marginBottom = 4f;
+            row.style.flexShrink = 0;
+
+            var toggle = new Toggle(channelName);
+            toggle.name = toggleName;
+            toggle.value = true;
+            toggle.style.flexGrow = 1;
+            toggle.style.fontSize = 10;
+            toggle.tooltip = toggleTooltip;
+
+            var format = new DropdownField(formatChoices, defaultFormatIndex);
+            format.name = formatName;
+            format.label = string.Empty;
+            format.style.width = 70f;
+            format.style.flexShrink = 0;
+            format.style.minHeight = 22f;
+            format.tooltip = formatTooltip;
+
+            row.Add(toggle);
+            row.Add(format);
+            return row;
+        }
+
+        /// <summary>
+        /// EZ <c>parameter_panel.py</c> PERFORMANCE <c>QGroupBox</c> — parallel frames; handlers wire in
+        /// <see cref="OutputPerformanceSectionController"/>.
+        /// </summary>
+        static VisualElement BuildParametersPerformanceSection()
+        {
+            var section = new VisualElement { name = "parameters-performance-section" };
+            StyleParametersRailBandedSection(section);
+
+            var toggle = new Button { text = "PERFORMANCE \u25B6" };
+            toggle.name = "parameters-performance-section-toggle";
+            toggle.AddToClassList("corridor-key-param-advanced-toggle");
+            toggle.style.alignSelf = Align.FlexStart;
+            toggle.style.marginBottom = 4f;
+            toggle.style.flexShrink = 0;
+            toggle.tooltip = "Show or hide performance options.";
+
+            var body = new VisualElement { name = "parameters-performance-body" };
+            body.style.flexDirection = FlexDirection.Column;
+            body.style.alignItems = Align.Stretch;
+            body.style.flexGrow = 0;
+            body.style.flexShrink = 0;
+            body.style.display = DisplayStyle.None;
+
+            var muted = new Color(0.63f, 0.62f, 0.56f, 1f);
+
+            var parallelRow = new VisualElement { name = "parameters-performance-parallel-row" };
+            parallelRow.style.flexDirection = FlexDirection.Row;
+            parallelRow.style.alignItems = Align.Center;
+            parallelRow.style.flexShrink = 0;
+
+            var parallelLabel = new Label("Parallel frames");
+            parallelLabel.name = "parameters-performance-parallel-label";
+            parallelLabel.style.flexGrow = 1;
+            parallelLabel.style.fontSize = 10;
+            parallelLabel.style.color = muted;
+            parallelLabel.tooltip =
+                "Process multiple frames simultaneously using parallel engines.\n\n"
+                + "Each extra engine loads a full copy of the model.\n"
+                + "CUDA: ~6-8 GB VRAM per engine.\n\n"
+                + "Default: 1 (safest). Try 2 first, then increase if stable.\n\n"
+                + "EXPERIMENTAL: Values above 8 are for high-memory CUDA systems\n"
+                + "(e.g. RTX 6000).\n"
+                + "If you run out of memory, the app will automatically scale\n"
+                + "back to however many engines fit.\n\n"
+                + "CUDA only right now. Not currently supported on Apple Silicon.";
+
+            var parallelFrames = new IntegerField { value = 1 };
+            parallelFrames.name = "parameters-performance-parallel-frames";
+            parallelFrames.label = string.Empty;
+            parallelFrames.style.width = 60f;
+            parallelFrames.style.flexShrink = 0;
+            parallelFrames.tooltip = parallelLabel.tooltip;
+            parallelFrames.isDelayed = false;
+
+            parallelRow.Add(parallelLabel);
+            parallelRow.Add(parallelFrames);
+            body.Add(parallelRow);
+
+            section.Add(toggle);
+            section.Add(body);
+            return section;
+        }
+
+        /// <summary>
+        /// Sizes the alpha-rail <see cref="ScrollView"/> to the measured content height, capped so the bordered
+        /// ALPHA block does not stretch to fill the rail; internal scrolling appears when content exceeds the cap.
+        /// </summary>
+        static void SyncParametersAlphaScrollViewport(
+            ScrollView innerAlphaScroll,
+            VisualElement parametersShell,
+            VisualElement parametersRail,
+            VisualElement parametersAlphaTitle)
+        {
+            var root = innerAlphaScroll.Q<VisualElement>("parameters-rail-root");
+            if (root == null)
+                return;
+
+            // Use shell height (stretches with viewer row); rail alone can be 0 before first layout.
+            var railH = parametersShell.layout.height >= 1f && !float.IsNaN(parametersShell.layout.height)
+                ? parametersShell.layout.height
+                : parametersRail.layout.height;
+            if (railH < 32f || float.IsNaN(railH) || float.IsInfinity(railH))
+                return;
+            // Shell is row[rail | tab]; rail column height matches shell minus small fudge for tab alignment.
+            railH -= 2f;
+
+            var titleH = parametersAlphaTitle.layout.height >= 1f ? parametersAlphaTitle.layout.height : 18f;
+            var inference = parametersRail.Q<VisualElement>("parameters-inference-section");
+            float inferenceH;
+            if (inference != null && inference.layout.height >= 1f && !float.IsNaN(inference.layout.height))
+                inferenceH = inference.layout.height;
+            else
+                inferenceH = ParametersInferenceSectionReservePx;
+
+            var output = parametersRail.Q<VisualElement>("parameters-output-section");
+            float outputH;
+            if (output != null && output.layout.height >= 1f && !float.IsNaN(output.layout.height))
+                outputH = output.layout.height;
+            else
+                outputH = ParametersOutputSectionReservePx;
+
+            var performance = parametersRail.Q<VisualElement>("parameters-performance-section");
+            float performanceH;
+            if (performance != null && performance.layout.height >= 1f && !float.IsNaN(performance.layout.height))
+                performanceH = performance.layout.height;
+            else
+                performanceH = ParametersPerformanceSectionReservePx;
+
+            const float chromeReserve = 40f;
+            var rawMax = railH - titleH - chromeReserve - inferenceH - outputH - performanceH;
+            // Do not use Mathf.Max(120, …): when the rail is short that steals space from INFERENCE. Allow tight caps.
+            var maxViewport = Mathf.Max(0f, rawMax);
+            if (maxViewport < 1f && root.layout.height >= 1f)
+                maxViewport = Mathf.Min(root.layout.height, 160f);
+
+            var contentH = root.layout.height;
+            if (contentH < 1f || float.IsNaN(contentH) || float.IsInfinity(contentH))
+                return;
+
+            var viewport = Mathf.Min(contentH, maxViewport);
+            innerAlphaScroll.style.height = viewport;
+            innerAlphaScroll.style.maxHeight = maxViewport;
+        }
+
+        /// <summary>
         /// Unity parameters rail: Auto vs Guided (see <c>ALPHA_GENERATION_UI_IMPROVEMENTS.md</c>), Advanced GVM/BiRefNet,
         /// Guided Draw (Track mask → MatAnyone vs VideoMaMa) or Import.
         /// </summary>
@@ -349,7 +830,8 @@ namespace CorridorKey.Editor.UI
         {
             var root = new VisualElement { name = "parameters-rail-root" };
             root.style.flexDirection = FlexDirection.Column;
-            root.style.flexGrow = 1;
+            root.style.flexGrow = 0;
+            root.style.flexShrink = 0;
             root.style.paddingBottom = 8f;
 
             var modeRow = new VisualElement { name = "parameters-mode-row" };
@@ -708,7 +1190,7 @@ namespace CorridorKey.Editor.UI
                 + "Yellow lane: inference output coverage.\n\n"
                 + "(Binds to clip state; EZ <c>CoverageBar</c>.)";
 
-            var slider = new Slider(0f, 0f, SliderDirection.Horizontal);
+            var slider = new Slider(string.Empty, 0f, 0f, SliderDirection.Horizontal);
             slider.name = "viewer-playhead-slider";
             slider.AddToClassList("corridor-key-playhead-slider");
             slider.style.flexGrow = 1;
@@ -799,6 +1281,16 @@ namespace CorridorKey.Editor.UI
             abButton.style.marginRight = 0f;
             abButton.AddToClassList(EzChromeButtonClass);
 
+            var abRendererButton = new Button { text = "GPU" };
+            abRendererButton.name = "viewer-ab-renderer-button";
+            abRendererButton.tooltip = "Temporary A/B preview path toggle.\nCPU = composited Texture2D preview.\nGPU = shader-based RenderTexture preview.";
+            abRendererButton.style.width = 42f;
+            abRendererButton.style.height = 24f;
+            abRendererButton.style.marginLeft = 2f;
+            abRendererButton.style.display = DisplayStyle.None;
+            abRendererButton.AddToClassList(EzChromeButtonClass);
+            abRendererButton.AddToClassList(EzChromeButtonActiveClass);
+
             var abDivider = new VisualElement { name = "viewer-ab-divider" };
             abDivider.pickingMode = PickingMode.Ignore;
             abDivider.style.width = 1f;
@@ -832,6 +1324,7 @@ namespace CorridorKey.Editor.UI
             chrome.Add(frameLabel);
             chrome.Add(statusLabel);
             chrome.Add(abButton);
+            chrome.Add(abRendererButton);
             chrome.Add(abDivider);
             chrome.Add(modeBar);
             return chrome;

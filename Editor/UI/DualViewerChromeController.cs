@@ -11,17 +11,21 @@ namespace CorridorKey.Editor.UI
     public sealed class DualViewerChromeController
     {
         public event System.Action<bool>? AbToggled;
+        public event System.Action<bool>? AbRendererModeToggled;
 
         readonly Button _abButton;
+        readonly Button _abRendererButton;
         readonly Button[] _modeButtons;
         readonly string[] _modeIds;
 
         bool _abWipeOn;
+        bool _gpuPreviewOn = true;
         int _selectedModeIndex = -1;
 
         public DualViewerChromeController(VisualElement root)
         {
             _abButton = root.Q<Button>("viewer-ab-button");
+            _abRendererButton = root.Q<Button>("viewer-ab-renderer-button");
             var modeBar = root.Q<VisualElement>("viewer-view-mode-bar");
             var specs = CorridorKeyWindowLayout.ViewModeChromeSpecs;
             if (modeBar == null)
@@ -42,6 +46,8 @@ namespace CorridorKey.Editor.UI
 
             if (_abButton != null)
                 _abButton.RegisterCallback<ClickEvent>(OnAbClicked);
+            if (_abRendererButton != null)
+                _abRendererButton.RegisterCallback<ClickEvent>(OnAbRendererClicked);
 
             for (var i = 0; i < _modeButtons.Length; i++)
             {
@@ -61,6 +67,8 @@ namespace CorridorKey.Editor.UI
                     break;
                 }
             }
+
+            SetAbRendererVisual(_gpuPreviewOn);
         }
 
         void OnAbClicked(ClickEvent evt)
@@ -72,6 +80,17 @@ namespace CorridorKey.Editor.UI
             Debug.Log(_abWipeOn
                 ? "[CorridorKey] A/B wipe: ON"
                 : "[CorridorKey] A/B wipe: OFF");
+        }
+
+        void OnAbRendererClicked(ClickEvent evt)
+        {
+            evt.StopPropagation();
+            _gpuPreviewOn = !_gpuPreviewOn;
+            SetAbRendererVisual(_gpuPreviewOn);
+            AbRendererModeToggled?.Invoke(_gpuPreviewOn);
+            Debug.Log(_gpuPreviewOn
+                ? "[CorridorKey] A/B preview renderer: GPU"
+                : "[CorridorKey] A/B preview renderer: CPU");
         }
 
         void SelectViewMode(int index)
@@ -98,6 +117,18 @@ namespace CorridorKey.Editor.UI
                 _abButton.AddToClassList(CorridorKeyWindowLayout.EzChromeButtonActiveClass);
             else
                 _abButton.RemoveFromClassList(CorridorKeyWindowLayout.EzChromeButtonActiveClass);
+        }
+
+        void SetAbRendererVisual(bool gpuOn)
+        {
+            if (_abRendererButton == null)
+                return;
+
+            _abRendererButton.text = gpuOn ? "GPU" : "CPU";
+            if (gpuOn)
+                _abRendererButton.AddToClassList(CorridorKeyWindowLayout.EzChromeButtonActiveClass);
+            else
+                _abRendererButton.RemoveFromClassList(CorridorKeyWindowLayout.EzChromeButtonActiveClass);
         }
 
         void SetModeActive(int index, bool active)

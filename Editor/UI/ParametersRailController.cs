@@ -5,7 +5,8 @@ using UnityEngine.UIElements;
 namespace CorridorKey.Editor.UI
 {
     /// <summary>
-    /// Parameters rail: Auto vs Guided, Advanced fold, Guided Draw vs Import, step-2 MatAnyone2 vs VideoMaMa toggles
+    /// Parameters rail: ALPHA / INFERENCE / OUTPUT / PERFORMANCE section folds, Auto vs Guided, Advanced fold,
+    /// Guided Draw vs Import, step-2 MatAnyone2 vs VideoMaMa toggles
     /// (EZ chrome styling via <see cref="CorridorKeyWindowLayout.SetEzChromeToggleExclusive"/>).
     /// </summary>
     public sealed class ParametersRailController
@@ -14,6 +15,22 @@ namespace CorridorKey.Editor.UI
         const string AdvancedCollapsed = "Advanced \u25B6";
 
         const string AdvancedExpanded = "Advanced \u25BC";
+
+        const string AlphaCollapsed = "ALPHA \u25B6";
+
+        const string AlphaExpanded = "ALPHA \u25BC";
+
+        const string InferenceCollapsed = "INFERENCE \u25B6";
+
+        const string InferenceExpanded = "INFERENCE \u25BC";
+
+        const string OutputCollapsed = "OUTPUT \u25B6";
+
+        const string OutputExpanded = "OUTPUT \u25BC";
+
+        const string PerformanceCollapsed = "PERFORMANCE \u25B6";
+
+        const string PerformanceExpanded = "PERFORMANCE \u25BC";
 
         readonly Button _modeAutoBtn;
         readonly Button _modeGuidedBtn;
@@ -33,7 +50,20 @@ namespace CorridorKey.Editor.UI
         readonly Button _mattingEngineVmBtn;
         readonly Button _importAlphaBtn;
 
+        readonly Button _alphaSectionToggle;
+        readonly VisualElement _alphaSectionBody;
+        readonly Button _inferenceSectionToggle;
+        readonly VisualElement _inferenceSectionBody;
+        readonly Button _outputSectionToggle;
+        readonly VisualElement _outputSectionBody;
+        readonly Button _performanceSectionToggle;
+        readonly VisualElement _performanceSectionBody;
+
         bool _advancedExpanded;
+        bool _alphaExpanded;
+        bool _inferenceExpanded;
+        bool _outputExpanded;
+        bool _performanceExpanded;
 
         public ParametersRailController(VisualElement root)
         {
@@ -71,6 +101,22 @@ namespace CorridorKey.Editor.UI
                                   ?? throw new System.InvalidOperationException("parameters-toggle-videomama");
             _importAlphaBtn = root.Q<Button>("parameters-import-alpha-btn")
                               ?? throw new System.InvalidOperationException("parameters-import-alpha-btn");
+            _alphaSectionToggle = root.Q<Button>("parameters-alpha-section-toggle")
+                                  ?? throw new System.InvalidOperationException("parameters-alpha-section-toggle");
+            _alphaSectionBody = root.Q<VisualElement>("parameters-alpha-body")
+                                ?? throw new System.InvalidOperationException("parameters-alpha-body");
+            _inferenceSectionToggle = root.Q<Button>("parameters-inference-section-toggle")
+                                      ?? throw new System.InvalidOperationException("parameters-inference-section-toggle");
+            _inferenceSectionBody = root.Q<VisualElement>("parameters-inference-body")
+                                    ?? throw new System.InvalidOperationException("parameters-inference-body");
+            _outputSectionToggle = root.Q<Button>("parameters-output-section-toggle")
+                                   ?? throw new System.InvalidOperationException("parameters-output-section-toggle");
+            _outputSectionBody = root.Q<VisualElement>("parameters-output-body")
+                                 ?? throw new System.InvalidOperationException("parameters-output-body");
+            _performanceSectionToggle = root.Q<Button>("parameters-performance-section-toggle")
+                                        ?? throw new System.InvalidOperationException("parameters-performance-section-toggle");
+            _performanceSectionBody = root.Q<VisualElement>("parameters-performance-body")
+                                      ?? throw new System.InvalidOperationException("parameters-performance-body");
 
             _modeAutoBtn.clicked += OnModeAutoClicked;
             _modeGuidedBtn.clicked += OnModeGuidedClicked;
@@ -84,6 +130,10 @@ namespace CorridorKey.Editor.UI
             _mattingEngineVmBtn.clicked += OnMattingVideoMaMaClicked;
             _importAlphaBtn.clicked += OnImportAlphaClicked;
             _advancedToggle.clicked += OnAdvancedClicked;
+            _alphaSectionToggle.clicked += OnAlphaSectionClicked;
+            _inferenceSectionToggle.clicked += OnInferenceSectionClicked;
+            _outputSectionToggle.clicked += OnOutputSectionClicked;
+            _performanceSectionToggle.clicked += OnPerformanceSectionClicked;
 
             ApplyTopMode();
             ApplyDrawImport();
@@ -155,6 +205,34 @@ namespace CorridorKey.Editor.UI
             _advancedExpanded = !_advancedExpanded;
             _advancedBody.style.display = _advancedExpanded ? DisplayStyle.Flex : DisplayStyle.None;
             _advancedToggle.text = _advancedExpanded ? AdvancedExpanded : AdvancedCollapsed;
+        }
+
+        void OnAlphaSectionClicked()
+        {
+            _alphaExpanded = !_alphaExpanded;
+            _alphaSectionBody.style.display = _alphaExpanded ? DisplayStyle.Flex : DisplayStyle.None;
+            _alphaSectionToggle.text = _alphaExpanded ? AlphaExpanded : AlphaCollapsed;
+        }
+
+        void OnInferenceSectionClicked()
+        {
+            _inferenceExpanded = !_inferenceExpanded;
+            _inferenceSectionBody.style.display = _inferenceExpanded ? DisplayStyle.Flex : DisplayStyle.None;
+            _inferenceSectionToggle.text = _inferenceExpanded ? InferenceExpanded : InferenceCollapsed;
+        }
+
+        void OnOutputSectionClicked()
+        {
+            _outputExpanded = !_outputExpanded;
+            _outputSectionBody.style.display = _outputExpanded ? DisplayStyle.Flex : DisplayStyle.None;
+            _outputSectionToggle.text = _outputExpanded ? OutputExpanded : OutputCollapsed;
+        }
+
+        void OnPerformanceSectionClicked()
+        {
+            _performanceExpanded = !_performanceExpanded;
+            _performanceSectionBody.style.display = _performanceExpanded ? DisplayStyle.Flex : DisplayStyle.None;
+            _performanceSectionToggle.text = _performanceExpanded ? PerformanceExpanded : PerformanceCollapsed;
         }
 
         bool IsGuidedMode() =>

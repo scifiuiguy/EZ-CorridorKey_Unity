@@ -7,12 +7,11 @@ using UnityEngine.UIElements;
 
 namespace CorridorKey.Editor.UI
 {
-    public sealed class SampleAbComparisonRenderer : IDisposable
+    public sealed class GpuAbComparisonRenderer : IDisposable
     {
-        const int MaxCompositeDimensionPx = 1024;
-        const float SplitAntialiasWidthPx = 1.25f;
         const string SampleAPath = "Editor/PrototypeSamples/greenscreen-test-02/frame_000000/Comp/frame_000000.png";
         const string SampleBPath = "Editor/PrototypeSamples/greenscreen-test-02/frame_000000/Processed/frame_000000.png";
+        const string ShaderName = "Hidden/CorridorKey/AbSplitPreview";
 
         readonly VisualElement _surface;
         readonly VisualElement _overlay;
@@ -21,14 +20,17 @@ namespace CorridorKey.Editor.UI
         readonly Label? _hint;
         readonly Image _image;
 
+        int _rebuildGeneration;
+
         Texture2D? _sourceA;
         Texture2D? _sourceB;
-        Texture2D? _composited;
+        RenderTexture? _renderTexture;
+        Material? _material;
         bool _enabled;
         Vector2 _midpointNormalized = new Vector2(0.5f, 0.5f);
         float _angleDeg = 90f;
 
-        public SampleAbComparisonRenderer(VisualElement root)
+        public GpuAbComparisonRenderer(VisualElement root)
         {
             _surface = root.Q<VisualElement>("viewer-ab-comparison-surface")
                 ?? throw new InvalidOperationException("Missing viewer-ab-comparison-surface.");
@@ -40,7 +42,7 @@ namespace CorridorKey.Editor.UI
 
             _image = new Image
             {
-                name = "viewer-ab-comparison-image",
+                name = "viewer-ab-comparison-image-gpu",
                 scaleMode = ScaleMode.StretchToFill,
                 pickingMode = PickingMode.Ignore
             };
@@ -49,14 +51,21 @@ namespace CorridorKey.Editor.UI
 
             _surface.RegisterCallback<GeometryChangedEvent>(OnSurfaceGeometryChanged);
             LoadSampleTextures();
+            LoadMaterial();
             UpdateHintVisibility();
+            _image.style.display = DisplayStyle.None;
         }
 
         public void Dispose()
         {
             _surface.UnregisterCallback<GeometryChangedEvent>(OnSurfaceGeometryChanged);
-            if (_composited != null)
-                UnityEngine.Object.DestroyImmediate(_composited);
+            if (_renderTexture != null)
+            {
+                _renderTexture.Release();
+                UnityEngine.Object.DestroyImmediate(_renderTexture);
+            }
+            if (_material != null)
+                UnityEngine.Object.DestroyImmediate(_material);
             if (_sourceA != null)
                 UnityEngine.Object.DestroyImmediate(_sourceA);
             if (_sourceB != null)
@@ -66,12 +75,33 @@ namespace CorridorKey.Editor.UI
         public void SetEnabled(bool enabled)
         {
             _enabled = enabled;
-            _image.style.display = enabled && _sourceA != null && _sourceB != null ? DisplayStyle.Flex : DisplayStyle.None;
+            _image.style.display = enabled && _sourceA != null && _sourceB != null && _material != null ? DisplayStyle.Flex : DisplayStyle.None;
             UpdateHintVisibility();
             if (!_enabled)
                 return;
 
-            RebuildComposite();
+            _rebuildGeneration++;
+            var gen = _rebuildGeneration;
+            RebuildPreview();
+
+            // UITK often has not finished layout when we first enable; delayCall runs after the editor frame (after layout).
+            EditorApplication.delayCall += DelayedRebuild;
+            if (_surface.panel != null)
+            {
+                _surface.panel.visualTree.schedule.Execute(() =>
+                {
+                    if (!_enabled || gen != _rebuildGeneration)
+                        return;
+                    RebuildPreview();
+                }).ExecuteLater(0);
+            }
+
+            void DelayedRebuild()
+            {
+                if (!_enabled || gen != _rebuildGeneration)
+                    return;
+                RebuildPreview();
+            }
         }
 
         public void SetSplit(Vector2 midpointNormalized, float angleDeg)
@@ -79,13 +109,13 @@ namespace CorridorKey.Editor.UI
             _midpointNormalized = midpointNormalized;
             _angleDeg = angleDeg;
             if (_enabled)
-                RebuildComposite();
+                RebuildPreview();
         }
 
         void OnSurfaceGeometryChanged(GeometryChangedEvent evt)
         {
             if (_enabled)
-                RebuildComposite();
+                RebuildPreview();
         }
 
         void LoadSampleTextures()
@@ -94,9 +124,20 @@ namespace CorridorKey.Editor.UI
             _sourceB = LoadReadablePngTexture(SampleBPath);
         }
 
-        void RebuildComposite()
+        void LoadMaterial()
         {
-            if (_sourceA == null || _sourceB == null)
+            var shader = Shader.Find(ShaderName);
+            if (shader == null)
+                return;
+            _material = new Material(shader)
+            {
+                hideFlags = HideFlags.HideAndDontSave
+            };
+        }
+
+        void RebuildPreview()
+        {
+            if (_sourceA == null || _sourceB == null || _material == null)
                 return;
 
             var container = AbComparisonPreviewMath.ResolveAbPreviewContainerSize(_surface, _dualViewerHost, _viewerColumn);
@@ -105,55 +146,48 @@ namespace CorridorKey.Editor.UI
                 new Vector2(_sourceA.width, _sourceA.height));
             ApplyPresentationRect(fittedRect);
 
-            var width = Mathf.Clamp(Mathf.RoundToInt(fittedRect.width), 1, MaxCompositeDimensionPx);
-            var height = Mathf.Clamp(Mathf.RoundToInt(fittedRect.height), 1, MaxCompositeDimensionPx);
-            if (width <= 0 || height <= 0)
+            var width = Mathf.Max(1, Mathf.RoundToInt(fittedRect.width));
+            var height = Mathf.Max(1, Mathf.RoundToInt(fittedRect.height));
+            EnsureRenderTexture(width, height);
+            if (_renderTexture == null)
                 return;
 
-            EnsureCompositeTexture(width, height);
-
-            var pixels = new Color32[width * height];
-            var centerPx = new Vector2(_midpointNormalized.x * width, _midpointNormalized.y * height);
             var normal = AbComparisonPreviewMath.GetLineNormalUnitVector(_angleDeg);
+            // Blit binds the source texture as _MainTex only; side A must be sampled from _MainTex in the shader.
+            _material.SetTexture("_TexB", _sourceB);
+            _material.SetVector("_SplitCenter", new Vector4(_midpointNormalized.x, _midpointNormalized.y, 0f, 0f));
+            _material.SetVector("_SplitNormal", new Vector4(normal.x, normal.y, 0f, 0f));
+            _material.SetVector("_SplitViewportPx", new Vector4(width, height, 0f, 0f));
 
-            for (var y = 0; y < height; y++)
-            {
-                var v = height > 1 ? y / (float)(height - 1) : 0f;
-                var uiY = (height - 1) - y;
-                for (var x = 0; x < width; x++)
-                {
-                    var u = width > 1 ? x / (float)(width - 1) : 0f;
-                    // Evaluate the split in UI space (top-left origin) at pixel centers, not corners.
-                    var p = new Vector2(x + 0.5f, uiY + 0.5f);
-                    var signedDistance = Vector2.Dot(p - centerPx, normal);
-                    var colorA = _sourceA.GetPixelBilinear(u, v);
-                    var colorB = _sourceB.GetPixelBilinear(u, v);
-                    var blend = Mathf.Clamp01((signedDistance + SplitAntialiasWidthPx) / (SplitAntialiasWidthPx * 2f));
-                    var color = Color.Lerp(colorA, colorB, blend);
-                    pixels[(y * width) + x] = color;
-                }
-            }
+            // Source must be non-null (not the backbuffer). First argument also becomes _MainTex for this pass.
+            Graphics.Blit(_sourceA, _renderTexture, _material, 0);
 
-            _composited!.SetPixels32(pixels);
-            _composited.Apply(updateMipmaps: false, makeNoLongerReadable: false);
-            _image.image = _composited;
+            // Force UITK to pick up RT contents (first assign after enable can otherwise show stale framebuffer).
+            _image.image = null;
+            _image.image = _renderTexture;
             _image.MarkDirtyRepaint();
+            _surface.MarkDirtyRepaint();
         }
 
-        void EnsureCompositeTexture(int width, int height)
+        void EnsureRenderTexture(int width, int height)
         {
-            if (_composited != null && _composited.width == width && _composited.height == height)
+            if (_renderTexture != null && _renderTexture.width == width && _renderTexture.height == height)
                 return;
 
-            if (_composited != null)
-                UnityEngine.Object.DestroyImmediate(_composited);
+            if (_renderTexture != null)
+            {
+                _renderTexture.Release();
+                UnityEngine.Object.DestroyImmediate(_renderTexture);
+            }
 
-            _composited = new Texture2D(width, height, TextureFormat.RGBA32, mipChain: false)
+            _renderTexture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32)
             {
                 wrapMode = TextureWrapMode.Clamp,
                 filterMode = FilterMode.Bilinear,
-                name = "CorridorKey-AbSampleComposite"
+                hideFlags = HideFlags.HideAndDontSave,
+                name = "CorridorKey-AbGpuPreview"
             };
+            _renderTexture.Create();
         }
 
         void UpdateHintVisibility()
@@ -161,7 +195,8 @@ namespace CorridorKey.Editor.UI
             if (_hint == null)
                 return;
 
-            _hint.style.display = _sourceA != null && _sourceB != null ? DisplayStyle.None : DisplayStyle.Flex;
+            _hint.style.display =
+                (_sourceA != null && _sourceB != null && _material != null) ? DisplayStyle.None : DisplayStyle.Flex;
         }
 
         void ApplyPresentationRect(Rect rect)
@@ -212,6 +247,5 @@ namespace CorridorKey.Editor.UI
 
             return texture.LoadImage(bytes, markNonReadable: false) ? texture : null;
         }
-
     }
 }

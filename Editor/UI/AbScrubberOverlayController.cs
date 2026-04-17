@@ -96,6 +96,14 @@ namespace CorridorKey.Editor.UI
             SplitChanged?.Invoke(_midpointNormalized, _angleDeg);
         }
 
+        /// <summary>
+        /// Call after A/B preview renderers are enabled so subscribers rebuild with valid layout and <see cref="_enabled"/> true.
+        /// </summary>
+        public void NotifySplitChanged()
+        {
+            SplitChanged?.Invoke(_midpointNormalized, _angleDeg);
+        }
+
         void OnOverlayGeometryChanged(GeometryChangedEvent evt)
         {
             UpdateOverlayVisuals();

@@ -28,11 +28,21 @@ namespace CorridorKey.Editor
         CorridorKeySessionVm? _session;
         QueueSidebarController? _queueSidebar;
         ParametersSidebarController? _parametersSidebar;
+        InferenceSectionController? _inferenceSectionController;
+        OutputPerformanceSectionController? _outputPerformanceSectionController;
         HorizontalViewerIoSplitController? _viewerIoSplit;
         VerticalViewerIoTraySplitController? _viewerIoTraySplit;
         IoFilesBarToggleController? _ioFilesBar;
         AbScrubberOverlayController? _abScrubberOverlay;
         SampleAbComparisonRenderer? _sampleAbComparisonRenderer;
+        GpuAbComparisonRenderer? _gpuAbComparisonRenderer;
+
+        /// <summary>Unity may persist <see cref="EditorWindow"/> fields across domain reloads; reset in <see cref="CreateGUI"/>.</summary>
+        [System.NonSerialized]
+        bool _abPreviewEnabled;
+
+        [System.NonSerialized]
+        bool _abGpuPreviewEnabled = true;
 
         bool _immersiveViewersActive;
         bool _savedQueueExpanded;
@@ -84,6 +94,8 @@ namespace CorridorKey.Editor
             _session = null;
             _queueSidebar = null;
             _parametersSidebar = null;
+            _inferenceSectionController = null;
+            _outputPerformanceSectionController = null;
             _viewerIoSplit?.Dispose();
             _viewerIoSplit = null;
             _viewerIoTraySplit?.Dispose();
@@ -93,12 +105,19 @@ namespace CorridorKey.Editor
             _abScrubberOverlay = null;
             _sampleAbComparisonRenderer?.Dispose();
             _sampleAbComparisonRenderer = null;
+            _gpuAbComparisonRenderer?.Dispose();
+            _gpuAbComparisonRenderer = null;
         }
 
         void CreateGUI()
         {
             StopInferenceLoadTestAnimation();
 
+            // Default: dual INPUT/OUTPUT panes. Without this, Unity-restored field values can leave A/B mode on
+            // after a recompile while chrome state is rebuilt (mismatch → A/B view hides the two panes until toggled).
+            _abPreviewEnabled = false;
+            _abGpuPreviewEnabled = true;
+
             _viewerIoSplit?.Dispose();
             _viewerIoSplit = null;
             _viewerIoTraySplit?.Dispose();
@@ -108,6 +127,10 @@ namespace CorridorKey.Editor
             _abScrubberOverlay = null;
             _sampleAbComparisonRenderer?.Dispose();
             _sampleAbComparisonRenderer = null;
+            _gpuAbComparisonRenderer?.Dispose();
+            _gpuAbComparisonRenderer = null;
+            _inferenceSectionController = null;
+            _outputPerformanceSectionController = null;
 
             var root = rootVisualElement;
             root.Clear();
@@ -144,6 +167,12 @@ namespace CorridorKey.Editor
             if (parametersShell != null && parametersRail != null && parametersTab != null)
                 _parametersSidebar = new ParametersSidebarController(parametersShell, parametersRail, parametersTab);
 
+            if (parametersRail != null)
+            {
+                _inferenceSectionController = new InferenceSectionController(parametersRail);
+                _outputPerformanceSectionController = new OutputPerformanceSectionController(parametersRail);
+            }
+
             _viewerIoSplit = HorizontalViewerIoSplitController.TryAttach(body);
             _viewerIoTraySplit = VerticalViewerIoTraySplitController.TryAttach(body);
             _ioFilesBar = IoFilesBarToggleController.TryAttach(body, _viewerIoSplit, _viewerIoTraySplit);
@@ -151,16 +180,28 @@ namespace CorridorKey.Editor
             var dualViewerChrome = new DualViewerChromeController(body);
             _abScrubberOverlay = new AbScrubberOverlayController(body);
             _sampleAbComparisonRenderer = new SampleAbComparisonRenderer(body);
+            _gpuAbComparisonRenderer = new GpuAbComparisonRenderer(body);
             if (_abScrubberOverlay != null && _sampleAbComparisonRenderer != null)
             {
                 _abScrubberOverlay.SplitChanged += _sampleAbComparisonRenderer.SetSplit;
                 _sampleAbComparisonRenderer.SetSplit(_abScrubberOverlay.MidpointNormalized, _abScrubberOverlay.AngleDeg);
             }
+            if (_abScrubberOverlay != null && _gpuAbComparisonRenderer != null)
+            {
+                _abScrubberOverlay.SplitChanged += _gpuAbComparisonRenderer.SetSplit;
+                _gpuAbComparisonRenderer.SetSplit(_abScrubberOverlay.MidpointNormalized, _abScrubberOverlay.AngleDeg);
+            }
             dualViewerChrome.AbToggled += on =>
             {
-                _abScrubberOverlay?.SetEnabled(on);
-                _sampleAbComparisonRenderer?.SetEnabled(on);
+                _abPreviewEnabled = on;
+                ApplyAbPreviewMode();
             };
+            dualViewerChrome.AbRendererModeToggled += gpuOn =>
+            {
+                _abGpuPreviewEnabled = gpuOn;
+                ApplyAbPreviewMode();
+            };
+            ApplyAbPreviewMode();
             _ = new ViewerPlayheadStripController(body);
             _ = new ParametersRailController(body);
             SeedQueueDummyCards(body);
@@ -208,6 +249,31 @@ namespace CorridorKey.Editor
             }
 
             _immersiveViewersActive = false;
+        }
+
+        void ApplyAbPreviewMode()
+        {
+            if (!_abPreviewEnabled)
+            {
+                _abScrubberOverlay?.SetEnabled(false);
+                _sampleAbComparisonRenderer?.SetEnabled(false);
+                _gpuAbComparisonRenderer?.SetEnabled(false);
+                return;
+            }
+
+            // Scrubber first: host + overlay visible; then preview renderers. Defer NotifySplitChanged to next editor
+            // frame so overlay has measured layout (UpdateOverlayVisuals also fires SplitChanged when geometry lands).
+            _abScrubberOverlay?.SetEnabled(true);
+            _sampleAbComparisonRenderer?.SetEnabled(!_abGpuPreviewEnabled);
+            _gpuAbComparisonRenderer?.SetEnabled(_abGpuPreviewEnabled);
+            EditorApplication.delayCall += NotifyAbSplitIfStillEnabled;
+        }
+
+        void NotifyAbSplitIfStillEnabled()
+        {
+            if (!_abPreviewEnabled)
+                return;
+            _abScrubberOverlay?.NotifySplitChanged();
         }
 
         void StopInferenceLoadTestAnimation()
