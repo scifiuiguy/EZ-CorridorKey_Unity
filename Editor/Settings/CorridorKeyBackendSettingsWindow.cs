@@ -119,8 +119,6 @@ namespace CorridorKey.Editor.Settings
                 "Folder that contains `backend/` (e.g. your EZ clone). The bridge runs with this as the process working directory.",
                 MessageType.None);
 
-            EditorGUILayout.Space(8);
-
             if (Application.platform == RuntimePlatform.WindowsEditor)
             {
                 EditorGUILayout.LabelField("NVML DLL (optional, Windows GPU meter)", EditorStyles.boldLabel);

@@ -27,6 +27,11 @@
 *.opendb
 *.VC.db
 
+# Python (Editor bridge helpers)
+__pycache__/
+**/__pycache__.meta
+*.py[cod]
+
 # OS
 .DS_Store
 Thumbs.db

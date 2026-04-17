@@ -17,7 +17,6 @@ namespace CorridorKey.Editor.Settings
 
         /// <summary>Optional full path to <c>nvml.dll</c> for the header GPU meter (Windows). Empty = auto-resolve.</summary>
         public const string NvmlDllPathKey = "CorridorKey.NvmlDllPath";
-
         const string PythonKey = PythonExecutableKey;
         const string WorkingDirKey = BackendWorkingDirectoryKey;
         const string NvmlKey = NvmlDllPathKey;

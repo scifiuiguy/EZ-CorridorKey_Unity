@@ -14,8 +14,14 @@ namespace CorridorKey.Backend
         event Action<ProgressPayload>? ProgressReceived;
         event Action<ClipStatePayload>? ClipStateReceived;
         event Action<string>? ErrorReceived;
+        /// <summary>Phase 1 diagnostics: <c>diag.*</c> results from <c>unity_bridge.py</c>.</summary>
+        event Action<DiagnosticResultPayload>? DiagnosticResultReceived;
+        /// <summary>One command finished (correlate with <see cref="BridgeCommandDonePayload.RequestId"/>).</summary>
+        event Action<BridgeCommandDonePayload>? BridgeCommandDoneReceived;
 
         void RequestHealthCheck();
+        /// <summary>Optional correlation id for <see cref="BridgeCommandDoneReceived"/>.</summary>
+        void RequestHealthCheck(string? requestId);
         void Cancel();
     }
 }

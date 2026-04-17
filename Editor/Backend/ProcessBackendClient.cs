@@ -33,8 +33,12 @@ namespace CorridorKey.Editor.Backend
         public event Action<ProgressPayload>? ProgressReceived;
         public event Action<ClipStatePayload>? ClipStateReceived;
         public event Action<string>? ErrorReceived;
+        public event Action<DiagnosticResultPayload>? DiagnosticResultReceived;
+        public event Action<BridgeCommandDonePayload>? BridgeCommandDoneReceived;
 
-        public void RequestHealthCheck()
+        public void RequestHealthCheck() => RequestHealthCheck(null);
+
+        public void RequestHealthCheck(string? requestId)
         {
             lock (_processLock)
             {
@@ -47,7 +51,10 @@ namespace CorridorKey.Editor.Backend
 
                 try
                 {
-                    WriteStdinLineUnlocked("{\"cmd\":\"health\"}");
+                    var line = string.IsNullOrEmpty(requestId)
+                        ? "{\"cmd\":\"health\"}"
+                        : JsonUtility.ToJson(new HealthStdin { cmd = "health", request_id = requestId });
+                    WriteStdinLineUnlocked(line);
                 }
                 catch (Exception ex)
                 {
@@ -55,6 +62,38 @@ namespace CorridorKey.Editor.Backend
                     HealthReceived?.Invoke(new HealthPayload(false, ex.Message));
                 }
             }
+        }
+
+        /// <summary>
+        /// Sends one JSON object line to the bridge (stdin). Ensures the Python process is running.
+        /// Use for <c>diag.*</c> commands; payload must be JsonUtility-serializable.
+        /// </summary>
+        public string? TrySendJson<T>(T stdinPayload) where T : class
+        {
+            if (stdinPayload == null)
+                return "Payload is null.";
+            lock (_processLock)
+            {
+                var err = TryEnsureProcessUnderLock();
+                if (err != null)
+                    return err;
+                try
+                {
+                    WriteStdinLineUnlocked(JsonUtility.ToJson(stdinPayload));
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    return ex.Message;
+                }
+            }
+        }
+
+        [Serializable]
+        class HealthStdin
+        {
+            public string cmd = "health";
+            public string request_id = string.Empty;
         }
 
         public void Cancel()
@@ -100,6 +139,7 @@ namespace CorridorKey.Editor.Backend
             if (string.IsNullOrEmpty(ezRoot))
                 return "EditorPrefs missing EZ root (CorridorKey.BackendWorkingDirectory). Point at your EZ-CorridorKey checkout.";
 
+            // Bridge script always lives in this Unity package; EZ/R is only the process cwd (imports, modules/, checkpoints).
             var bridge = CorridorKeyPackagePaths.GetUnityBridgeScriptPath();
             if (string.IsNullOrEmpty(bridge) || !File.Exists(bridge))
                 return "unity_bridge.py not found inside this package (Editor/Backend/Python/).";
@@ -121,21 +161,25 @@ namespace CorridorKey.Editor.Backend
             };
 
             var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
+
+            // Enqueue stdout before any Python line is read, or early NDJSON lines are dropped (InstanceReader was null).
+            InstanceReader = this;
+            RegisterEditorUpdate();
+
             try
             {
                 proc.Start();
             }
             catch (Exception ex)
             {
+                InstanceReader = null;
+                UnregisterEditorUpdate();
                 return $"Failed to start Python: {ex.Message}";
             }
 
             _process = proc;
             _readCts = new CancellationTokenSource();
             var token = _readCts.Token;
-
-            InstanceReader = this;
-            RegisterEditorUpdate(); // drains _lineQueue on main thread before InstanceReader is cleared
 
             _ioTasks = Task.Run(
                 () =>
@@ -250,7 +294,19 @@ namespace CorridorKey.Editor.Backend
             }
 
             if (string.IsNullOrEmpty(msg.type))
+            {
+                // JsonUtility often returns an empty object instead of throwing (e.g. oversized or unsupported JSON).
+                var t = line.TrimStart();
+                if (t.StartsWith("{", StringComparison.Ordinal))
+                {
+                    var preview = line.Length > 280 ? line.Substring(0, 280) + "…" : line;
+                    UnityEngine.Debug.LogWarning(
+                        "[CorridorKey] Bridge JSON line deserialized to empty type (Unity JsonUtility limitation?). Preview: "
+                            + preview);
+                }
+
                 return;
+            }
 
             switch (msg.type)
             {
@@ -267,7 +323,8 @@ namespace CorridorKey.Editor.Backend
                     ProgressReceived?.Invoke(new ProgressPayload(
                         msg.current,
                         msg.total,
-                        string.IsNullOrEmpty(msg.phase) ? null : msg.phase));
+                        string.IsNullOrEmpty(msg.phase) ? null : msg.phase,
+                        string.IsNullOrEmpty(msg.detail) ? null : msg.detail));
                     break;
                 case "clip_state":
                     if (!string.IsNullOrEmpty(msg.clip)
@@ -277,7 +334,19 @@ namespace CorridorKey.Editor.Backend
                 case "error":
                     ErrorReceived?.Invoke(msg.message ?? msg.summary ?? "Unknown error");
                     break;
+                case "diag_result":
+                    DiagnosticResultReceived?.Invoke(new DiagnosticResultPayload(
+                        msg.request_id ?? string.Empty,
+                        msg.diag ?? string.Empty,
+                        msg.ok,
+                        msg.summary ?? string.Empty));
+                    break;
                 case "done":
+                    BridgeCommandDoneReceived?.Invoke(new BridgeCommandDonePayload(
+                        msg.cmd ?? string.Empty,
+                        msg.request_id ?? string.Empty,
+                        msg.ok,
+                        string.IsNullOrEmpty(msg.summary) ? null : msg.summary));
                     break;
                 default:
                     UnityEngine.Debug.Log($"[CorridorKey] Unhandled bridge type: {msg.type}");
@@ -356,9 +425,12 @@ namespace CorridorKey.Editor.Backend
             public string message = string.Empty;
             public string logger = string.Empty;
             public string cmd = string.Empty;
+            public string request_id = string.Empty;
+            public string diag = string.Empty;
             public int current;
             public int total;
             public string phase = string.Empty;
+            public string detail = string.Empty;
             public string clip = string.Empty;
             public string state = string.Empty;
         }
