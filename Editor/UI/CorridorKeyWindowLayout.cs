@@ -1438,6 +1438,7 @@ namespace CorridorKey.Editor.UI
             surface.style.justifyContent = Justify.Center;
 
             var hint = new Label("Viewer");
+            hint.name = $"{paneName}-placeholder-label";
             hint.style.fontSize = 10;
             hint.style.color = new Color(0.45f, 0.45f, 0.42f);
             surface.Add(hint);

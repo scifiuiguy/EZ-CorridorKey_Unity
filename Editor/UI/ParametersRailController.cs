@@ -1,4 +1,5 @@
 #nullable enable
+using CorridorKey.Editor.Integration;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -68,6 +69,8 @@ namespace CorridorKey.Editor.UI
         readonly Button _performanceSectionToggle;
         readonly VisualElement _performanceSectionBody;
 
+        readonly BiRefNetViewerIntegration? _biRefNetIntegration;
+
         bool _advancedExpanded;
         bool _alphaExpanded;
         bool _inferenceExpanded;
@@ -80,8 +83,9 @@ namespace CorridorKey.Editor.UI
         public AutoAlphaHintSource SelectedAutoAlphaHintSource =>
             _radioGvm.value ? AutoAlphaHintSource.Gvm : AutoAlphaHintSource.BiRefNet;
 
-        public ParametersRailController(VisualElement root)
+        public ParametersRailController(VisualElement root, BiRefNetViewerIntegration? biRefNetIntegration = null)
         {
+            _biRefNetIntegration = biRefNetIntegration;
             _modeAutoBtn = root.Q<Button>("parameters-toggle-auto")
                            ?? throw new System.InvalidOperationException("parameters-toggle-auto");
             _modeGuidedBtn = root.Q<Button>("parameters-toggle-guided")
@@ -240,7 +244,13 @@ namespace CorridorKey.Editor.UI
         /// <summary>Same work as clicking BIREFNET (bridge hook).</summary>
         void ActivateBiRefNetAlphaHint()
         {
-            Debug.Log($"[CorridorKey] BIREFNET clicked. Model: {_birefNetDropdown.value}");
+            if (_biRefNetIntegration != null)
+            {
+                _biRefNetIntegration.RequestBiRefNetForDefaultClip(_birefNetDropdown.value);
+                return;
+            }
+
+            Debug.Log($"[CorridorKey] BIREFNET clicked (no integration). Model: {_birefNetDropdown.value}");
         }
 
         void OnGvmAutoClicked()

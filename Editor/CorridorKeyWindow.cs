@@ -1,6 +1,7 @@
 #nullable enable
 using CorridorKey.Backend.Payloads;
 using CorridorKey.Editor.Backend;
+using CorridorKey.Editor.Integration;
 using CorridorKey.Editor.UI;
 using CorridorKey.Editor.ViewModels;
 using UnityEditor;
@@ -37,6 +38,10 @@ namespace CorridorKey.Editor
         SampleAbComparisonRenderer? _sampleAbComparisonRenderer;
         GpuAbComparisonRenderer? _gpuAbComparisonRenderer;
         GpuMeterHeaderController? _gpuMeterHeader;
+
+        BiRefNetViewerIntegration? _biRefNetViewerIntegration;
+
+        DualViewerChromeController? _dualViewerChrome;
 
         /// <summary>Unity may persist <see cref="EditorWindow"/> fields across domain reloads; reset in <see cref="CreateGUI"/>.</summary>
         [System.NonSerialized]
@@ -83,6 +88,9 @@ namespace CorridorKey.Editor
         void OnDisable()
         {
             StopInferenceLoadTestAnimation();
+
+            _biRefNetViewerIntegration?.Dispose();
+            _biRefNetViewerIntegration = null;
 
             if (_backend != null)
             {
@@ -134,6 +142,8 @@ namespace CorridorKey.Editor
             _gpuAbComparisonRenderer = null;
             _gpuMeterHeader?.Dispose();
             _gpuMeterHeader = null;
+            _biRefNetViewerIntegration?.Dispose();
+            _biRefNetViewerIntegration = null;
             _inferenceSectionController = null;
             _outputPerformanceSectionController = null;
 
@@ -184,7 +194,7 @@ namespace CorridorKey.Editor
             _viewerIoTraySplit = VerticalViewerIoTraySplitController.TryAttach(body);
             _ioFilesBar = IoFilesBarToggleController.TryAttach(body, _viewerIoSplit, _viewerIoTraySplit);
 
-            var dualViewerChrome = new DualViewerChromeController(body);
+            _dualViewerChrome = new DualViewerChromeController(body);
             _abScrubberOverlay = new AbScrubberOverlayController(body);
             _sampleAbComparisonRenderer = new SampleAbComparisonRenderer(body);
             _gpuAbComparisonRenderer = new GpuAbComparisonRenderer(body);
@@ -198,19 +208,31 @@ namespace CorridorKey.Editor
                 _abScrubberOverlay.SplitChanged += _gpuAbComparisonRenderer.SetSplit;
                 _gpuAbComparisonRenderer.SetSplit(_abScrubberOverlay.MidpointNormalized, _abScrubberOverlay.AngleDeg);
             }
-            dualViewerChrome.AbToggled += on =>
+
+            if (_backend != null)
+            {
+                _biRefNetViewerIntegration?.Dispose();
+                _biRefNetViewerIntegration = new BiRefNetViewerIntegration(
+                    _backend,
+                    body,
+                    _sampleAbComparisonRenderer,
+                    _gpuAbComparisonRenderer,
+                    _dualViewerChrome);
+            }
+
+            _dualViewerChrome.AbToggled += on =>
             {
                 _abPreviewEnabled = on;
                 ApplyAbPreviewMode();
             };
-            dualViewerChrome.AbRendererModeToggled += gpuOn =>
+            _dualViewerChrome.AbRendererModeToggled += gpuOn =>
             {
                 _abGpuPreviewEnabled = gpuOn;
                 ApplyAbPreviewMode();
             };
             ApplyAbPreviewMode();
             _ = new ViewerPlayheadStripController(body);
-            _ = new ParametersRailController(body);
+            _ = new ParametersRailController(body, _biRefNetViewerIntegration);
             SeedQueueDummyCards(body);
 
             body.Q<Button>("status-run-selected")?.RegisterCallback<ClickEvent>(_ =>

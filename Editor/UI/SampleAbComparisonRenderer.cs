@@ -57,10 +57,49 @@ namespace CorridorKey.Editor.UI
             _surface.UnregisterCallback<GeometryChangedEvent>(OnSurfaceGeometryChanged);
             if (_composited != null)
                 UnityEngine.Object.DestroyImmediate(_composited);
+            ReleaseSources();
+        }
+
+        void ReleaseSources()
+        {
             if (_sourceA != null)
+            {
                 UnityEngine.Object.DestroyImmediate(_sourceA);
+                _sourceA = null;
+            }
+
             if (_sourceB != null)
+            {
                 UnityEngine.Object.DestroyImmediate(_sourceB);
+                _sourceB = null;
+            }
+
+        }
+
+        /// <summary>Replace A/B wipe sources (e.g. first input frame vs BiRefNet alpha). Pass null to skip a side.</summary>
+        public void SetComparisonSourcesFromAbsoluteFiles(string? pathA, string? pathB)
+        {
+            ReleaseSources();
+            if (!string.IsNullOrEmpty(pathA))
+                _sourceA = TextureFileLoader.LoadReadableFromFile(pathA);
+            if (!string.IsNullOrEmpty(pathB))
+                _sourceB = TextureFileLoader.LoadReadableFromFile(pathB);
+
+            UpdateHintVisibility();
+            _image.style.display = _enabled && _sourceA != null && _sourceB != null ? DisplayStyle.Flex : DisplayStyle.None;
+            if (_enabled)
+                RebuildComposite();
+        }
+
+        /// <summary>Restore embedded prototype Comp/Processed samples (development default).</summary>
+        public void RestoreDefaultPrototypeSamples()
+        {
+            ReleaseSources();
+            LoadSampleTextures();
+            UpdateHintVisibility();
+            _image.style.display = _enabled && _sourceA != null && _sourceB != null ? DisplayStyle.Flex : DisplayStyle.None;
+            if (_enabled)
+                RebuildComposite();
         }
 
         public void SetEnabled(bool enabled)

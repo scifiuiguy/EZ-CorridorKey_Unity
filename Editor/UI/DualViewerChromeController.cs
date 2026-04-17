@@ -71,6 +71,22 @@ namespace CorridorKey.Editor.UI
             SetAbRendererVisual(_gpuPreviewOn);
         }
 
+        /// <summary>Selects a view mode by <see cref="CorridorKeyWindowLayout.ViewModeChromeSpecs"/> id (e.g. <c>alpha</c>, <c>comp</c>).</summary>
+        public void SelectViewModeById(string modeId)
+        {
+            if (string.IsNullOrEmpty(modeId))
+                return;
+            for (var i = 0; i < _modeIds.Length; i++)
+            {
+                if (!string.Equals(_modeIds[i], modeId, System.StringComparison.Ordinal))
+                    continue;
+                if (_modeButtons[i] == null)
+                    return;
+                SelectViewMode(i);
+                return;
+            }
+        }
+
         void OnAbClicked(ClickEvent evt)
         {
             evt.StopPropagation();

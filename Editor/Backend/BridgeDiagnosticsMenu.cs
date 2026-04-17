@@ -615,15 +615,5 @@ namespace CorridorKey.Editor.Backend
             public bool overwrite;
         }
 
-        [Serializable]
-        class BiRefNetHintStdin
-        {
-            public string cmd = "alpha.birefnet_hint";
-            public string request_id = string.Empty;
-            public string clip_root = string.Empty;
-            public string frames_dir = string.Empty;
-            public string usage = "Matting";
-            public bool overwrite;
-        }
     }
 }

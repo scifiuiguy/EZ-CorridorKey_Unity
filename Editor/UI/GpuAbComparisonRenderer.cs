@@ -70,10 +70,79 @@ namespace CorridorKey.Editor.UI
             }
             if (_material != null)
                 UnityEngine.Object.DestroyImmediate(_material);
+            ReleaseTextureSources();
+        }
+
+        void ReleaseTextureSources()
+        {
             if (_sourceA != null)
+            {
                 UnityEngine.Object.DestroyImmediate(_sourceA);
+                _sourceA = null;
+            }
+
             if (_sourceB != null)
+            {
                 UnityEngine.Object.DestroyImmediate(_sourceB);
+                _sourceB = null;
+            }
+        }
+
+        /// <summary>Replace A/B wipe GPU sources from absolute file paths (same contract as CPU sample path).</summary>
+        public void SetComparisonSourcesFromAbsoluteFiles(string? pathA, string? pathB)
+        {
+            ReleaseTextureSources();
+            if (!string.IsNullOrEmpty(pathA))
+                _sourceA = TextureFileLoader.LoadReadableFromFile(pathA);
+            if (!string.IsNullOrEmpty(pathB))
+                _sourceB = TextureFileLoader.LoadReadableFromFile(pathB);
+
+            UpdateHintVisibility();
+            _rebuildGeneration++;
+            var gen = _rebuildGeneration;
+            _image.style.display = _enabled && _sourceA != null && _sourceB != null && _material != null ? DisplayStyle.Flex : DisplayStyle.None;
+            if (!_enabled)
+                return;
+
+            RebuildPreview();
+            EditorApplication.delayCall += DelayedRebuild;
+            if (_surface.panel != null)
+            {
+                _surface.panel.visualTree.schedule.Execute(() =>
+                {
+                    if (!_enabled || gen != _rebuildGeneration || _disposed)
+                        return;
+                    RebuildPreview();
+                }).ExecuteLater(0);
+            }
+
+            void DelayedRebuild()
+            {
+                if (!_enabled || gen != _rebuildGeneration || _disposed)
+                    return;
+                RebuildPreview();
+            }
+        }
+
+        /// <summary>Restore embedded prototype Comp/Processed samples.</summary>
+        public void RestoreDefaultPrototypeSamples()
+        {
+            ReleaseTextureSources();
+            LoadSampleTextures();
+            UpdateHintVisibility();
+            _rebuildGeneration++;
+            var gen = _rebuildGeneration;
+            _image.style.display = _enabled && _sourceA != null && _sourceB != null && _material != null ? DisplayStyle.Flex : DisplayStyle.None;
+            if (!_enabled)
+                return;
+
+            RebuildPreview();
+            EditorApplication.delayCall += () =>
+            {
+                if (!_enabled || gen != _rebuildGeneration || _disposed)
+                    return;
+                RebuildPreview();
+            };
         }
 
         public void SetEnabled(bool enabled)
