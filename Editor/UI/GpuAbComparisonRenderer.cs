@@ -61,11 +61,7 @@ namespace CorridorKey.Editor.UI
         public void Dispose()
         {
             _disposed = true;
-            if (_deferredPreviewRebuildPending)
-            {
-                EditorApplication.delayCall -= OnDeferredPreviewRebuild;
-                _deferredPreviewRebuildPending = false;
-            }
+            CancelDeferredPreviewRebuild();
             _surface.UnregisterCallback<GeometryChangedEvent>(OnSurfaceGeometryChanged);
             if (_renderTexture != null)
             {
@@ -114,12 +110,26 @@ namespace CorridorKey.Editor.UI
 
         public void SetSplit(Vector2 midpointNormalized, float angleDeg)
         {
+            // SplitChanged runs on every overlay GeometryChanged with the same midpoint/angle when only layout
+            // changed (FILES / PARAMETERS / tray) — defer those. When the user drags, values change every move;
+            // deferring those made the GPU path a frame behind the CPU path (which rebuilds synchronously).
+            const float midEpsSq = 1e-12f;
+            const float angleEps = 0.0001f;
+            var splitValuesChanged =
+                (midpointNormalized - _midpointNormalized).sqrMagnitude > midEpsSq
+                || Mathf.Abs(Mathf.DeltaAngle(angleDeg, _angleDeg)) > angleEps;
+
             _midpointNormalized = midpointNormalized;
             _angleDeg = angleDeg;
-            // SplitChanged is raised from AbScrubberOverlay UpdateOverlayVisuals on every overlay GeometryChanged
-            // (FILES bar + PARAMETERS change I/O tray / rail size). That bypasses viewer-ab-comparison-surface
-            // geometry debounce unless we defer here too.
-            if (_enabled)
+            if (!_enabled)
+                return;
+
+            if (splitValuesChanged)
+            {
+                CancelDeferredPreviewRebuild();
+                RebuildPreview();
+            }
+            else
                 ScheduleDeferredPreviewRebuild();
         }
 
@@ -129,6 +139,14 @@ namespace CorridorKey.Editor.UI
                 return;
 
             ScheduleDeferredPreviewRebuild();
+        }
+
+        void CancelDeferredPreviewRebuild()
+        {
+            if (!_deferredPreviewRebuildPending)
+                return;
+            EditorApplication.delayCall -= OnDeferredPreviewRebuild;
+            _deferredPreviewRebuildPending = false;
         }
 
         void ScheduleDeferredPreviewRebuild()
