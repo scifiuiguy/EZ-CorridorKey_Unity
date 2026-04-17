@@ -1,18 +1,34 @@
+#nullable enable
+using CorridorKey.Editor.ViewModels;
 using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace CorridorKey.Editor.UI
 {
+    /// <summary>References on a queue card for live updates from <see cref="QueueJobVm"/>.</summary>
+    public sealed class QueueJobCardHandle
+    {
+        public QueueJobCardHandle(QueueJobVm vm, ProgressBar progress, Label statusLabel)
+        {
+            Vm = vm;
+            Progress = progress;
+            StatusLabel = statusLabel;
+        }
+
+        public QueueJobVm Vm { get; }
+
+        public ProgressBar Progress { get; }
+
+        public Label StatusLabel { get; }
+    }
+
     /// <summary>
-    /// Factory for queue job cards (type/file/status on left + dismiss button on right).
+    /// Factory for queue job cards (type / clip / progress / status + dismiss).
     /// </summary>
     public static class QueueJobCardFactory
     {
-        public static VisualElement Create(
-            string typeText,
-            string fileText,
-            string statusText,
-            System.Action<VisualElement>? onRemove = null)
+        /// <summary>Attaches <see cref="QueueJobCardHandle"/> to <paramref name="card"/>.userData.</summary>
+        public static VisualElement Create(QueueJobVm vm, System.Action<VisualElement>? onRemove = null)
         {
             var card = new VisualElement { name = "queue-job-card" };
             card.style.flexDirection = FlexDirection.Row;
@@ -39,20 +55,27 @@ namespace CorridorKey.Editor.UI
             left.style.flexShrink = 1;
             left.style.minWidth = 0f;
 
-            var type = new Label(typeText) { name = "queue-job-type" };
+            var type = new Label(vm.TypeDisplay) { name = "queue-job-type" };
             type.style.unityFontStyleAndWeight = FontStyle.Bold;
             type.style.fontSize = 10;
             type.style.color = new Color(0.89f, 0.85f, 0.48f, 1f);
             type.style.marginBottom = 2f;
 
-            var file = new Label(fileText) { name = "queue-job-file" };
+            var file = new Label(vm.ClipFileLabel) { name = "queue-job-file" };
             file.style.fontSize = 10;
             file.style.color = new Color(0.77f, 0.76f, 0.67f, 1f);
             file.style.whiteSpace = WhiteSpace.NoWrap;
             file.style.textOverflow = TextOverflow.Ellipsis;
-            file.style.marginBottom = 2f;
+            file.style.marginBottom = 4f;
 
-            var status = new Label(statusText) { name = "queue-job-status" };
+            var progress = new ProgressBar { name = "queue-job-progress", title = " " };
+            progress.AddToClassList("corridor-key-queue-job-progress");
+            progress.style.height = 16f;
+            progress.style.marginBottom = 4f;
+            progress.lowValue = 0f;
+            progress.highValue = 100f;
+
+            var status = new Label(FormatStatusLine(vm)) { name = "queue-job-status" };
             status.style.fontSize = 9;
             status.style.color = new Color(0.62f, 0.62f, 0.56f, 1f);
             status.style.whiteSpace = WhiteSpace.NoWrap;
@@ -60,7 +83,11 @@ namespace CorridorKey.Editor.UI
 
             left.Add(type);
             left.Add(file);
+            left.Add(progress);
             left.Add(status);
+
+            var handle = new QueueJobCardHandle(vm, progress, status);
+            card.userData = handle;
 
             var removeBtn = new Button { text = "X" };
             removeBtn.name = "queue-job-remove";
@@ -82,13 +109,63 @@ namespace CorridorKey.Editor.UI
             removeBtn.style.borderBottomColor = new Color(0.24f, 0.23f, 0.12f, 1f);
             removeBtn.clicked += () =>
             {
-                Debug.Log($"[CorridorKey] Queue card remove clicked: {fileText}");
+                Debug.Log($"[CorridorKey] Queue card remove clicked: {vm.ClipFileLabel}");
                 onRemove?.Invoke(card);
             };
 
             card.Add(left);
             card.Add(removeBtn);
+
+            Apply(card, vm);
             return card;
+        }
+
+        /// <summary>Updates progress bar and status label from <paramref name="vm"/> (card must be from <see cref="Create"/>).</summary>
+        public static void Apply(VisualElement card, QueueJobVm vm)
+        {
+            if (card.userData is not QueueJobCardHandle h)
+                return;
+            Apply(h, vm);
+        }
+
+        public static void Apply(QueueJobCardHandle handle, QueueJobVm vm)
+        {
+            var bar = handle.Progress;
+            var statusLabel = handle.StatusLabel;
+
+            if (vm.TotalFrames > 0)
+            {
+                bar.lowValue = 0f;
+                bar.highValue = 100f;
+                var t = Mathf.Clamp01(vm.TotalFrames > 0 ? (float)vm.CurrentFrame / vm.TotalFrames : 0f);
+                bar.value = t * 100f;
+                bar.title = $"{vm.CurrentFrame} / {vm.TotalFrames}";
+            }
+            else
+            {
+                var indeterminate = vm.Status is QueueJobStatus.Queued or QueueJobStatus.Running;
+                bar.lowValue = 0f;
+                bar.highValue = 100f;
+                bar.value = indeterminate ? 0f : (vm.Status == QueueJobStatus.Succeeded ? 100f : 0f);
+                bar.title = indeterminate ? "Processing…" : "";
+            }
+
+            statusLabel.text = FormatStatusLine(vm);
+        }
+
+        static string FormatStatusLine(QueueJobVm vm)
+        {
+            if (!string.IsNullOrEmpty(vm.Detail))
+                return vm.Detail;
+            return vm.Status switch
+            {
+                QueueJobStatus.Queued => "Queued",
+                QueueJobStatus.Running => "Running",
+                QueueJobStatus.Succeeded => "Ready",
+                QueueJobStatus.Failed => "Failed",
+                QueueJobStatus.Cancelled => "Cancelled",
+                _ => "",
+            };
         }
     }
 }

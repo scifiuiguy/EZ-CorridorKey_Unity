@@ -7,6 +7,16 @@
     background-color: rgb(232, 200, 40);
 }
 
+/* Queue job card ProgressBar — same EZ yellow fill as status inference meter. */
+.corridor-key-queue-job-progress .unity-progress-bar__progress {
+    background-color: rgb(232, 200, 40);
+}
+
+/* Frame counter / title: slight down-right offset + blur for readability on yellow fill. */
+.corridor-key-queue-job-progress .unity-progress-bar__title {
+    text-shadow: 2px 2px 1px rgba(0, 0, 0, 1);
+}
+
 /* I/O tray INPUT header — EZ corridor_theme.qss QPushButton#trayAddBtn (brand #FFF203). */
 .corridor-key-io-tray-btn {
     background-color: transparent;

@@ -7,12 +7,18 @@ namespace CorridorKey.Backend.Payloads
     /// </summary>
     public sealed class ProgressPayload
     {
-        public ProgressPayload(int current, int total, string? phase = null, string? detail = null)
+        public ProgressPayload(
+            int current,
+            int total,
+            string? phase = null,
+            string? detail = null,
+            string? requestId = null)
         {
             Current = current;
             Total = total;
             Phase = phase;
             Detail = detail;
+            RequestId = requestId;
         }
 
         public int Current { get; }
@@ -20,5 +26,8 @@ namespace CorridorKey.Backend.Payloads
         public string? Phase { get; }
         /// <summary>Optional sub-step text from the bridge (load stages, ETA hints).</summary>
         public string? Detail { get; }
+
+        /// <summary>When set, ties this line to a bridge command (correlate with <see cref="QueueJobVm.JobId"/>).</summary>
+        public string? RequestId { get; }
     }
 }

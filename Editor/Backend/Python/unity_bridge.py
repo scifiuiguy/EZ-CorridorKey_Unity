@@ -818,6 +818,7 @@ def _run_alpha_birefnet_hint(
                 _emit(
                     {
                         "type": "progress",
+                        "request_id": request_id,
                         "current": curr,
                         "total": total_hint,
                         "phase": "birefnet_hint",
@@ -853,6 +854,7 @@ def _run_alpha_birefnet_hint(
                                 _emit(
                                     {
                                         "type": "progress",
+                                        "request_id": request_id,
                                         "current": sc,
                                         "total": stt,
                                         "phase": f"birefnet_{stage}",
@@ -866,6 +868,7 @@ def _run_alpha_birefnet_hint(
                                 _emit(
                                     {
                                         "type": "progress",
+                                        "request_id": request_id,
                                         "current": curr,
                                         "total": total_hint,
                                         "phase": f"birefnet_{stage}",
@@ -889,6 +892,7 @@ def _run_alpha_birefnet_hint(
                 _emit(
                     {
                         "type": "progress",
+                        "request_id": request_id,
                         "current": alpha_count,
                         "total": total_hint,
                         "phase": "birefnet_hint",
@@ -971,6 +975,7 @@ def _run_alpha_birefnet_hint(
                     _emit(
                         {
                             "type": "progress",
+                            "request_id": request_id,
                             "current": curr,
                             "total": total_hint,
                             "phase": pulse_phase,

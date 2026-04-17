@@ -3,6 +3,7 @@ using CorridorKey.Backend.Payloads;
 using CorridorKey.Editor.Backend;
 using CorridorKey.Editor.Integration;
 using CorridorKey.Editor.UI;
+using CorridorKey.Editor.UI.Presenters;
 using CorridorKey.Editor.ViewModels;
 using UnityEditor;
 using UnityEditor.UIElements;
@@ -28,6 +29,7 @@ namespace CorridorKey.Editor
         ProcessBackendClient? _backend;
         CorridorKeySessionVm? _session;
         QueueSidebarController? _queueSidebar;
+        QueuePresenter? _queuePresenter;
         ParametersSidebarController? _parametersSidebar;
         InferenceSectionController? _inferenceSectionController;
         OutputPerformanceSectionController? _outputPerformanceSectionController;
@@ -102,6 +104,12 @@ namespace CorridorKey.Editor
 
             _session = null;
             _queueSidebar = null;
+            if (_queuePresenter != null)
+            {
+                _queuePresenter.OnNewQueueCardCreated -= OnNewQueueCardCreated;
+                _queuePresenter.Dispose();
+                _queuePresenter = null;
+            }
             _parametersSidebar = null;
             _inferenceSectionController = null;
             _outputPerformanceSectionController = null;
@@ -178,6 +186,14 @@ namespace CorridorKey.Editor
             if (sidebar != null && queueContent != null && queueTab != null)
                 _queueSidebar = new QueueSidebarController(sidebar, queueContent, queueTab);
 
+            if (_queuePresenter != null)
+            {
+                _queuePresenter.OnNewQueueCardCreated -= OnNewQueueCardCreated;
+                _queuePresenter.Dispose();
+            }
+            _queuePresenter = new QueuePresenter(body, _backend!);
+            _queuePresenter.OnNewQueueCardCreated += OnNewQueueCardCreated;
+
             var parametersShell = body.Q<VisualElement>("parameters-rail-shell");
             var parametersRail = body.Q<VisualElement>("parameters-rail");
             var parametersTab = body.Q<VisualElement>("parameters-tab");
@@ -217,7 +233,8 @@ namespace CorridorKey.Editor
                     body,
                     _sampleAbComparisonRenderer,
                     _gpuAbComparisonRenderer,
-                    _dualViewerChrome);
+                    _dualViewerChrome,
+                    onQueueJobFailed: (vm, detail) => _queuePresenter?.FailJob(vm, detail));
             }
 
             _dualViewerChrome.AbToggled += on =>
@@ -232,8 +249,7 @@ namespace CorridorKey.Editor
             };
             ApplyAbPreviewMode();
             _ = new ViewerPlayheadStripController(body);
-            _ = new ParametersRailController(body, _biRefNetViewerIntegration);
-            SeedQueueDummyCards(body);
+            _ = new ParametersRailController(body, _biRefNetViewerIntegration, _queuePresenter);
 
             body.Q<Button>("status-run-selected")?.RegisterCallback<ClickEvent>(_ =>
                 Debug.Log("[CorridorKey] RUN SELECTED clicked."));
@@ -244,8 +260,7 @@ namespace CorridorKey.Editor
                 Debug.Log("[CorridorKey] ADD clicked."));
             body.Q<Button>("queue-clear-button")?.RegisterCallback<ClickEvent>(_ =>
             {
-                var queueScroll = body.Q<ScrollView>("queue-scroll");
-                queueScroll?.Clear();
+                _queuePresenter?.Clear();
                 Debug.Log("[CorridorKey] Queue > CLEAR clicked.");
             });
 
@@ -536,24 +551,9 @@ namespace CorridorKey.Editor
             host.Add(toolbar);
         }
 
-        static void SeedQueueDummyCards(VisualElement body)
+        void OnNewQueueCardCreated(QueueJobVm _)
         {
-            var queueScroll = body.Q<ScrollView>("queue-scroll");
-            if (queueScroll == null)
-                return;
-
-            queueScroll.Clear();
-            for (var i = 1; i <= 10; i++)
-            {
-                var card = QueueJobCardFactory.Create(
-                    typeText: i % 3 == 0 ? "INFERENCE" : (i % 2 == 0 ? "ALPHA" : "EXTRACT"),
-                    fileText: $"shot_{i:00}_greenscreen.mov",
-                    statusText: i % 4 == 0 ? "Queued" : (i % 5 == 0 ? "Ready" : "Waiting for worker"),
-                    onRemove: el => el.RemoveFromHierarchy());
-                queueScroll.Add(card);
-            }
-
-            Debug.Log("[CorridorKey] Seeded 10 dummy queue job cards (debug).");
+            _queueSidebar?.SetExpanded(true);
         }
 
         static void OnMenuImportFolder()

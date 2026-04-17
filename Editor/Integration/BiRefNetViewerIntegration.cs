@@ -6,6 +6,7 @@ using System.Linq;
 using CorridorKey.Backend.Payloads;
 using CorridorKey.Editor.Backend;
 using CorridorKey.Editor.UI;
+using CorridorKey.Editor.ViewModels;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -27,19 +28,22 @@ namespace CorridorKey.Editor.Integration
         Image? _outputImage;
 
         string? _pendingRequestId;
+        readonly Action<QueueJobVm, string>? _onQueueJobFailed;
 
         public BiRefNetViewerIntegration(
             ProcessBackendClient backend,
             VisualElement body,
             SampleAbComparisonRenderer? sampleAb,
             GpuAbComparisonRenderer? gpuAb,
-            DualViewerChromeController? dualViewerChrome = null)
+            DualViewerChromeController? dualViewerChrome = null,
+            Action<QueueJobVm, string>? onQueueJobFailed = null)
         {
             _backend = backend;
             _body = body;
             _sampleAb = sampleAb;
             _gpuAb = gpuAb;
             _dualViewerChrome = dualViewerChrome;
+            _onQueueJobFailed = onQueueJobFailed;
             _backend.BridgeCommandDoneReceived += OnBridgeCommandDone;
         }
 
@@ -49,25 +53,31 @@ namespace CorridorKey.Editor.Integration
         }
 
         /// <summary>Starts BiRefNet for the default <see cref="CorridorKeyDataPaths"/> clip (CorridorKeyData test tree).</summary>
-        public void RequestBiRefNetForDefaultClip(string usageDisplayName)
+        /// <param name="queueRow">When set, <see cref="QueueJobVm.JobId"/> is sent as <c>request_id</c> and the queue card is updated from bridge progress/done.</param>
+        public void RequestBiRefNetForDefaultClip(string usageDisplayName, QueueJobVm? queueRow = null)
         {
             if (!CorridorKeyDataPaths.TryGetDefaultTestClip(out var clipRoot, out var framesDir))
             {
                 Debug.LogError(
                     "[CorridorKey] BiRefNet: default test clip not found. Expected CorridorKeyData with Frames extracted.");
+                FailQueueRow(queueRow, "No default clip");
                 return;
             }
 
             if (!CorridorKeyDataPaths.IsPathUnderProject(clipRoot))
             {
                 Debug.LogError($"[CorridorKey] BiRefNet: refusing clip_root outside project: {clipRoot}");
+                FailQueueRow(queueRow, "Invalid clip path");
                 return;
             }
 
             var usageKey = string.IsNullOrWhiteSpace(usageDisplayName)
                 ? BiRefNetModelOptions.DefaultDisplayName
                 : usageDisplayName.Trim();
-            var requestId = Guid.NewGuid().ToString("N");
+            var requestId = queueRow != null ? queueRow.JobId : Guid.NewGuid().ToString("N");
+            if (queueRow != null)
+                queueRow.RequestId = requestId;
+
             _pendingRequestId = requestId;
 
             var payload = new BiRefNetHintStdin
@@ -84,6 +94,7 @@ namespace CorridorKey.Editor.Integration
             if (err != null)
             {
                 _pendingRequestId = null;
+                FailQueueRow(queueRow, err);
                 Debug.LogError($"[CorridorKey] BiRefNet: bridge send failed — {err}");
                 return;
             }
@@ -93,6 +104,13 @@ namespace CorridorKey.Editor.Integration
                 status.text = "BiRefNet… (see Console)";
 
             Debug.Log($"[CorridorKey] BiRefNet started (usage={usageKey}, request_id={requestId}).");
+        }
+
+        void FailQueueRow(QueueJobVm? queueRow, string detail)
+        {
+            if (queueRow == null)
+                return;
+            _onQueueJobFailed?.Invoke(queueRow, detail);
         }
 
         void OnBridgeCommandDone(BridgeCommandDonePayload p)

@@ -324,7 +324,8 @@ namespace CorridorKey.Editor.Backend
                         msg.current,
                         msg.total,
                         string.IsNullOrEmpty(msg.phase) ? null : msg.phase,
-                        string.IsNullOrEmpty(msg.detail) ? null : msg.detail));
+                        string.IsNullOrEmpty(msg.detail) ? null : msg.detail,
+                        string.IsNullOrEmpty(msg.request_id) ? null : msg.request_id));
                     break;
                 case "clip_state":
                     if (!string.IsNullOrEmpty(msg.clip)

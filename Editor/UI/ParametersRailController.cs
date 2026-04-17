@@ -1,5 +1,7 @@
 #nullable enable
 using CorridorKey.Editor.Integration;
+using CorridorKey.Editor.UI.Presenters;
+using CorridorKey.Editor.ViewModels;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -70,6 +72,7 @@ namespace CorridorKey.Editor.UI
         readonly VisualElement _performanceSectionBody;
 
         readonly BiRefNetViewerIntegration? _biRefNetIntegration;
+        readonly QueuePresenter? _queuePresenter;
 
         bool _advancedExpanded;
         bool _alphaExpanded;
@@ -83,9 +86,13 @@ namespace CorridorKey.Editor.UI
         public AutoAlphaHintSource SelectedAutoAlphaHintSource =>
             _radioGvm.value ? AutoAlphaHintSource.Gvm : AutoAlphaHintSource.BiRefNet;
 
-        public ParametersRailController(VisualElement root, BiRefNetViewerIntegration? biRefNetIntegration = null)
+        public ParametersRailController(
+            VisualElement root,
+            BiRefNetViewerIntegration? biRefNetIntegration = null,
+            QueuePresenter? queuePresenter = null)
         {
             _biRefNetIntegration = biRefNetIntegration;
+            _queuePresenter = queuePresenter;
             _modeAutoBtn = root.Q<Button>("parameters-toggle-auto")
                            ?? throw new System.InvalidOperationException("parameters-toggle-auto");
             _modeGuidedBtn = root.Q<Button>("parameters-toggle-guided")
@@ -262,7 +269,20 @@ namespace CorridorKey.Editor.UI
         void OnBiRefNetClicked()
         {
             ApplyAlphaHintSource(false);
-            ActivateBiRefNetAlphaHint();
+            var vm = BiRefNetAlphaHintQueueJob.CreateJobVm();
+            _queuePresenter?.Enqueue(vm);
+            ActivateBiRefNetAlphaHintWithQueue(vm);
+        }
+
+        void ActivateBiRefNetAlphaHintWithQueue(QueueJobVm vm)
+        {
+            if (_biRefNetIntegration != null)
+            {
+                _biRefNetIntegration.RequestBiRefNetForDefaultClip(_birefNetDropdown.value, vm);
+                return;
+            }
+
+            Debug.Log($"[CorridorKey] BIREFNET clicked (no integration). Model: {_birefNetDropdown.value}");
         }
 
         void OnBiRefNetDropdownChanged(ChangeEvent<string> evt)
