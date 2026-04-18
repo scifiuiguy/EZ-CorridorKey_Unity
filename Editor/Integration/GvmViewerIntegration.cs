@@ -31,6 +31,10 @@ namespace CorridorKey.Editor.Integration
         string? _pendingRequestId;
         readonly Action<QueueJobVm, string>? _onQueueJobFailed;
 
+        // Model download tracking
+        string? _pendingDownloadRequestId;
+        QueueJobVm? _queuedJobAfterDownload;
+
         public GvmViewerIntegration(
             ProcessBackendClient backend,
             VisualElement body,
@@ -71,6 +75,42 @@ namespace CorridorKey.Editor.Integration
                 return;
             }
 
+            // Check if GVM model is installed first
+            CheckAndDownloadGvmModel(queueRow, clipRoot, framesDir);
+        }
+
+        void CheckAndDownloadGvmModel(QueueJobVm? queueRow, string clipRoot, string framesDir)
+        {
+            var checkRequestId = Guid.NewGuid().ToString("N");
+            _pendingDownloadRequestId = checkRequestId;
+            _queuedJobAfterDownload = queueRow;
+
+            var checkPayload = new
+            {
+                cmd = "model.is_installed",
+                request_id = checkRequestId,
+                model_name = "gvm"
+            };
+
+            var err = _backend.TrySendJson(checkPayload);
+            if (err != null)
+            {
+                _pendingDownloadRequestId = null;
+                _queuedJobAfterDownload = null;
+                FailQueueRow(queueRow, $"Model check failed: {err}");
+                Debug.LogError($"[CorridorKey] GVM model check send failed — {err}");
+                return;
+            }
+
+            var status = _body.Q<Label>("viewer-shared-status-label");
+            if (status != null)
+                status.text = "Checking GVM model...";
+
+            Debug.Log($"[CorridorKey] Checking GVM model installation (request_id={checkRequestId}).");
+        }
+
+        void StartGvmAfterModelCheck(QueueJobVm? queueRow, string clipRoot, string framesDir)
+        {
             var requestId = queueRow != null ? queueRow.JobId : Guid.NewGuid().ToString("N");
             if (queueRow != null)
                 queueRow.RequestId = requestId;
@@ -110,6 +150,84 @@ namespace CorridorKey.Editor.Integration
 
         void OnBridgeCommandDone(BridgeCommandDonePayload p)
         {
+            // Handle model download check
+            if (!string.IsNullOrEmpty(_pendingDownloadRequestId) && p.RequestId == _pendingDownloadRequestId)
+            {
+                _pendingDownloadRequestId = null;
+                var status = _body.Q<Label>("viewer-shared-status-label");
+
+                if (p.Cmd == "model.is_installed")
+                {
+                    if (p.Ok)
+                    {
+                        // Model is installed, proceed with GVM
+                        Debug.Log("[CorridorKey] GVM model is installed, starting GVM alpha generation.");
+                        if (CorridorKeyDataPaths.TryGetDefaultTestClip(out var defaultClipRoot, out var defaultFramesDir))
+                        {
+                            StartGvmAfterModelCheck(_queuedJobAfterDownload, defaultClipRoot, defaultFramesDir);
+                        }
+                        else
+                        {
+                            FailQueueRow(_queuedJobAfterDownload, "No default clip after model check");
+                        }
+                    }
+                    else
+                    {
+                        // Model not installed, start download
+                        Debug.Log("[CorridorKey] GVM model not installed, starting download.");
+                        if (status != null)
+                            status.text = "Downloading GVM model...";
+                        
+                        var downloadRequestId = Guid.NewGuid().ToString("N");
+                        _pendingDownloadRequestId = downloadRequestId;
+                        
+                        var downloadPayload = new
+                        {
+                            cmd = "model.download_gvm",
+                            request_id = downloadRequestId
+                        };
+                        
+                        var err = _backend.TrySendJson(downloadPayload);
+                        if (err != null)
+                        {
+                            _pendingDownloadRequestId = null;
+                            _queuedJobAfterDownload = null;
+                            FailQueueRow(_queuedJobAfterDownload, $"Download start failed: {err}");
+                            Debug.LogError($"[CorridorKey] GVM download send failed — {err}");
+                        }
+                    }
+                    _queuedJobAfterDownload = null;
+                    return;
+                }
+                else if (p.Cmd == "model.download_gvm")
+                {
+                    if (p.Ok)
+                    {
+                        // Download succeeded, now start GVM
+                        Debug.Log("[CorridorKey] GVM model download completed, starting GVM alpha generation.");
+                        if (CorridorKeyDataPaths.TryGetDefaultTestClip(out var downloadClipRoot, out var downloadFramesDir))
+                        {
+                            StartGvmAfterModelCheck(_queuedJobAfterDownload, downloadClipRoot, downloadFramesDir);
+                        }
+                        else
+                        {
+                            FailQueueRow(_queuedJobAfterDownload, "No default clip after download");
+                        }
+                    }
+                    else
+                    {
+                        // Download failed
+                        FailQueueRow(_queuedJobAfterDownload, $"GVM model download failed: {p.Summary}");
+                        Debug.LogError($"[CorridorKey] GVM model download failed: {p.Summary}");
+                        if (status != null)
+                            status.text = "GVM model download failed";
+                    }
+                    _queuedJobAfterDownload = null;
+                    return;
+                }
+            }
+
+            // Handle GVM alpha generation
             if (string.IsNullOrEmpty(_pendingRequestId) || p.RequestId != _pendingRequestId)
                 return;
             if (p.Cmd != "alpha.gvm_hint")
@@ -117,27 +235,27 @@ namespace CorridorKey.Editor.Integration
 
             _pendingRequestId = null;
 
-            var status = _body.Q<Label>("viewer-shared-status-label");
+            var statusLabel = _body.Q<Label>("viewer-shared-status-label");
             if (!p.Ok)
             {
-                if (status != null)
-                    status.text = "GVM failed";
+                if (statusLabel != null)
+                    statusLabel.text = "GVM failed";
                 Debug.LogError($"[CorridorKey] GVM finished with error: {p.Summary}");
                 return;
             }
 
-            if (!CorridorKeyDataPaths.TryGetDefaultTestClip(out var clipRoot, out var framesDir))
+            if (!CorridorKeyDataPaths.TryGetDefaultTestClip(out var resultClipRoot, out var resultFramesDir))
             {
-                if (status != null)
-                    status.text = "Ready";
+                if (statusLabel != null)
+                    statusLabel.text = "Ready";
                 return;
             }
 
-            if (!TryGetFirstFrameAndAlphaPaths(clipRoot, framesDir, out var framePath, out var alphaPath))
+            if (!TryGetFirstFrameAndAlphaPaths(resultClipRoot, resultFramesDir, out var framePath, out var alphaPath))
             {
                 Debug.LogWarning("[CorridorKey] GVM ok but could not resolve first frame / alpha paths.");
-                if (status != null)
-                    status.text = "Ready";
+                if (statusLabel != null)
+                    statusLabel.text = "Ready";
                 return;
             }
 
@@ -147,8 +265,8 @@ namespace CorridorKey.Editor.Integration
 
             _dualViewerChrome?.SelectViewModeById("alpha");
 
-            if (status != null)
-                status.text = "Ready — GVM alpha ready (toggle A/B to compare)";
+            if (statusLabel != null)
+                statusLabel.text = "Ready — GVM alpha ready (toggle A/B to compare)";
 
             Debug.Log(
                 $"[CorridorKey] GVM UI: INPUT={Path.GetFileName(framePath)} OUTPUT(alpha)={Path.GetFileName(alphaPath)}");
