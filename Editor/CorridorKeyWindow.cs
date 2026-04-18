@@ -55,6 +55,7 @@ namespace CorridorKey.Editor
         string? _playheadClipRoot;
         Image? _playheadInputImage;
         Image? _playheadOutputImage;
+        InputAnnotationRasterController? _inputAnnotations;
 
         /// <summary>Unity may persist <see cref="EditorWindow"/> fields across domain reloads; reset in <see cref="CreateGUI"/>.</summary>
         [System.NonSerialized]
@@ -106,6 +107,8 @@ namespace CorridorKey.Editor
             _biRefNetViewerIntegration = null;
             _gvmViewerIntegration?.Dispose();
             _gvmViewerIntegration = null;
+            _inputAnnotations?.Dispose();
+            _inputAnnotations = null;
 
             if (_playheadStrip != null)
             {
@@ -179,6 +182,8 @@ namespace CorridorKey.Editor
             _biRefNetViewerIntegration = null;
             _gvmViewerIntegration?.Dispose();
             _gvmViewerIntegration = null;
+            _inputAnnotations?.Dispose();
+            _inputAnnotations = null;
             if (_playheadStrip != null)
             {
                 _playheadStrip.FrameChanged -= OnPlayheadFrameChanged;
@@ -297,6 +302,12 @@ namespace CorridorKey.Editor
             _viewerBody = body;
             _playheadStrip = new ViewerPlayheadStripController(body);
             _playheadStrip.FrameChanged += OnPlayheadFrameChanged;
+            _inputAnnotations = new InputAnnotationRasterController(
+                body,
+                () => _playheadClipRoot,
+                () => _playheadStrip != null ? _playheadStrip.CurrentStemIndex : 0,
+                () => _playheadInputImage);
+            _inputAnnotations.SetPlayheadStrip(_playheadStrip);
             WirePlayheadFromDefaultTestClip();
 
             _ = new ParametersRailController(body, _biRefNetViewerIntegration, _gvmViewerIntegration, _queuePresenter);
@@ -401,16 +412,19 @@ namespace CorridorKey.Editor
             if (!CorridorKeyDataPaths.TryGetDefaultTestClip(out var clipRoot, out var framesDir))
             {
                 _playheadStrip.SetFrameCount(0);
+                _inputAnnotations?.SetClipRoot(null);
                 return;
             }
 
             if (!ClipPlateFramePaths.TryCollectSortedPlateFrames(framesDir, out var paths))
             {
                 _playheadStrip.SetFrameCount(0);
+                _inputAnnotations?.SetClipRoot(null);
                 return;
             }
 
             _playheadClipRoot = clipRoot;
+            _inputAnnotations?.SetClipRoot(clipRoot);
             _plateFramePaths = paths;
             _playheadStrip.SetFrameCount(paths.Count);
             _dualViewerChrome?.SelectViewModeById("alpha");
@@ -464,6 +478,8 @@ namespace CorridorKey.Editor
 
             _sampleAbComparisonRenderer?.SetComparisonSourcesFromAbsoluteFiles(platePath, abOutputPath);
             _gpuAbComparisonRenderer?.SetComparisonSourcesFromAbsoluteFiles(platePath, abOutputPath);
+
+            _inputAnnotations?.NotifyInputPlateUpdated();
         }
 
         void ClearPlayheadOutputPaneToPlaceholder()
@@ -574,6 +590,13 @@ namespace CorridorKey.Editor
             var root = rootVisualElement;
             if (root == null)
                 return;
+
+            if (e.type == EventType.KeyDown && EditorWindow.focusedWindow == this
+                && _inputAnnotations != null && _inputAnnotations.TryHandleImGuiKeyDown(e))
+            {
+                e.Use();
+                return;
+            }
 
             var t = e.type;
             if (t != EventType.Layout && t != EventType.Repaint && t != EventType.MouseMove)
@@ -702,7 +725,9 @@ namespace CorridorKey.Editor
             editMenu.menu.AppendAction(
                 "Clear Paint Strokes",
                 _ => OnMenuClearPaintStrokes(),
-                _ => DropdownMenuAction.Status.Normal);
+                _ => _inputAnnotations != null && _inputAnnotations.HasAnyAnnotations()
+                    ? DropdownMenuAction.Status.Normal
+                    : DropdownMenuAction.Status.Disabled);
             toolbar.Add(editMenu);
 
             var viewMenu = new ToolbarMenu { text = "View" };
@@ -800,9 +825,17 @@ namespace CorridorKey.Editor
             Debug.Log("[CorridorKey] Edit > Track Paint Masks clicked.");
         }
 
-        static void OnMenuClearPaintStrokes()
+        void OnMenuClearPaintStrokes()
         {
-            Debug.Log("[CorridorKey] Edit > Clear Paint Strokes clicked.");
+            if (_inputAnnotations == null || !_inputAnnotations.HasAnyAnnotations())
+                return;
+            if (!EditorUtility.DisplayDialog(
+                    "Clear Paint Strokes",
+                    "Remove all brush strokes for this clip from annotations.json? This cannot be undone.",
+                    "Clear",
+                    "Cancel"))
+                return;
+            _inputAnnotations.ClearAllAnnotations();
         }
 
         static void OnMenuResetLayout()
