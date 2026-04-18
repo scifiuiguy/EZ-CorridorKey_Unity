@@ -843,10 +843,10 @@ namespace CorridorKey.Editor.UI
             var radioGvm = new RadioButton { name = "parameters-alpha-hint-radio-gvm" };
             radioGvm.value = false;
             radioGvm.tooltip =
-                "AlphaHint is treated as coming from GVM. Recommendation and VRAM guidance match the GVM AUTO button (see its tooltip).";
+                "AlphaHint is treated as coming from GVM. Recommendation and VRAM guidance match the GVM button (see its tooltip).";
             StyleParamRailAlphaHintRadio(radioGvm);
 
-            var gvmBtn = new Button { text = "GVM AUTO" };
+            var gvmBtn = new Button { text = "GVM" };
             gvmBtn.name = "parameters-gvm-btn";
             gvmBtn.SetEnabled(true);
             gvmBtn.tooltip =

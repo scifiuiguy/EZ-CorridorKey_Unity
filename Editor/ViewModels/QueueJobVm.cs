@@ -5,6 +5,7 @@ namespace CorridorKey.Editor.ViewModels
     public enum QueueJobKind
     {
         BiRefNetAlphaHint,
+        GvmAlphaHint,
     }
 
     public enum QueueJobStatus

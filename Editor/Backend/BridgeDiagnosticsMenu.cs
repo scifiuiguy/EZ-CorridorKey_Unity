@@ -361,7 +361,6 @@ namespace CorridorKey.Editor.Backend
             Debug.Log($"[CorridorKey] Starting GVM hint from frames: {framesDir}");
             var err = client.TrySendJson(new GvmHintStdin
             {
-                cmd = "alpha.gvm_hint",
                 request_id = requestId,
                 clip_root = clipRoot,
                 frames_dir = framesDir,
@@ -602,16 +601,6 @@ namespace CorridorKey.Editor.Backend
             public string request_id = string.Empty;
             public string input_path = string.Empty;
             public string output_dir = string.Empty;
-            public bool overwrite;
-        }
-
-        [Serializable]
-        class GvmHintStdin
-        {
-            public string cmd = "alpha.gvm_hint";
-            public string request_id = string.Empty;
-            public string clip_root = string.Empty;
-            public string frames_dir = string.Empty;
             public bool overwrite;
         }
 

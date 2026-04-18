@@ -485,9 +485,33 @@ def _run_alpha_gvm_hint(
     overwrite: bool,
 ) -> None:
     cmd_name = "alpha.gvm_hint"
+    success = False
+    stderr_path = ""
+    stderr_file = None
     try:
+        # Log immediately to a temp file to capture early errors
+        clip_root_raw = clip_root
+        frames_dir_raw = frames_dir
         clip_root = os.path.abspath((clip_root or "").strip())
         frames_dir = os.path.abspath((frames_dir or "").strip())
+        
+        # Create stderr early so we can log the startup sequence
+        bridge_tmp_dir_early = os.path.join(clip_root, ".bridge_tmp") if clip_root else ""
+        if bridge_tmp_dir_early:
+            try:
+                os.makedirs(bridge_tmp_dir_early, exist_ok=True)
+                stderr_path = os.path.join(bridge_tmp_dir_early, f"corridorkey_gvm_stderr_{request_id}.log")
+                stderr_file = open(stderr_path, "w", encoding="utf-8", buffering=1)
+                stderr_file.write(f"[START] GVM hint request_id={request_id}\n")
+                stderr_file.write(f"[ARGS] clip_root_raw={clip_root_raw!r}\n")
+                stderr_file.write(f"[ARGS] frames_dir_raw={frames_dir_raw!r}\n")
+                stderr_file.write(f"[ARGS] overwrite={overwrite}\n")
+                stderr_file.write(f"[RESOLVED] clip_root={clip_root}\n")
+                stderr_file.write(f"[RESOLVED] frames_dir={frames_dir}\n")
+                stderr_file.flush()
+            except Exception as e:
+                _emit({"type": "log", "level": "WARNING", "logger": "unity_bridge", "message": f"GVM: could not open early stderr log: {e}"})
+        
         if not clip_root or not frames_dir:
             msg = "clip_root and frames_dir are required"
             _emit({"type": "error", "message": msg})
@@ -534,16 +558,62 @@ def _run_alpha_gvm_hint(
         total_hint = max(1, len(frame_files))
         bridge_tmp_dir = os.path.join(clip_root, ".bridge_tmp")
         os.makedirs(bridge_tmp_dir, exist_ok=True)
+        
+        # stderr_path already set at function start, reuse it
+        if not stderr_path:
+            stderr_path = os.path.join(bridge_tmp_dir, f"corridorkey_gvm_stderr_{request_id}.log")
+        
         result_path = os.path.join(bridge_tmp_dir, f"corridorkey_gvm_result_{request_id}.json")
+        status_path = os.path.join(bridge_tmp_dir, f"corridorkey_gvm_status_{request_id}.json")
         runner_path = os.path.join(os.path.dirname(__file__), "gvm_hint_runner.py")
+        
+        # Close the early stderr file so the pump thread can open it
+        if stderr_file:
+            stderr_file.write(f"[INFO] closing early file handle for pump thread\n")
+            stderr_file.flush()
+            stderr_file.close()
+            stderr_file = None
+        
         try:
             if os.path.exists(result_path):
                 os.remove(result_path)
+            if os.path.exists(status_path):
+                os.remove(status_path)
+            # Don't delete stderr_path - we need it for diagnostics
         except Exception:
             pass
         if not os.path.isfile(runner_path):
             raise RuntimeError(f"runner script not found: {runner_path}")
         _emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": "gvm stage: start runner subprocess"})
+        popen_kw: dict = {
+            "stdout": subprocess.DEVNULL,
+            "stdin": subprocess.DEVNULL,
+            "stderr": subprocess.PIPE,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "bufsize": 1,
+            "cwd": os.getcwd(),
+        }
+        if sys.platform == "win32":
+            popen_kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        
+        # Log subprocess startup details to stderr before launching
+        try:
+            with open(stderr_path, "a", encoding="utf-8", buffering=1) as log:
+                log.write(f"[INFO] about to launch subprocess\n")
+                log.write(f"[INFO] runner_path={runner_path}\n")
+                log.write(f"[INFO] sys.executable={sys.executable}\n")
+                log.write(f"[INFO] cwd={os.getcwd()}\n")
+                log.write(f"[INFO] args: clip_root={clip_root}\n")
+                log.write(f"[INFO] args: frames_dir={frames_dir}\n")
+                log.write(f"[INFO] args: alpha_dir={alpha_dir}\n")
+                log.write(f"[INFO] args: result_path={result_path}\n")
+                log.write(f"[INFO] args: status_path={status_path}\n")
+                log.flush()
+        except Exception as e:
+            _emit({"type": "log", "level": "WARNING", "logger": "unity_bridge", "message": f"GVM: could not log subprocess startup: {e}"})
+        
         proc = subprocess.Popen(
             [
                 sys.executable,
@@ -553,21 +623,75 @@ def _run_alpha_gvm_hint(
                 frames_dir,
                 alpha_dir,
                 result_path,
+                status_path,
             ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            cwd=os.getcwd(),
+            **popen_kw,
         )
-        _emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": f"gvm runner pid={proc.pid} script={runner_path}"})
+        _emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": f"gvm runner pid={proc.pid} script={runner_path}; stderr -> {stderr_path}"})
+
+        def _pump_gvm_stderr() -> None:
+            try:
+                with open(stderr_path, "a", encoding="utf-8", buffering=1) as out:
+                    out.write(f"[INFO] unity_bridge: gvm stderr pump started (request_id={request_id})\n")
+                    if proc.stderr is not None:
+                        for line in proc.stderr:
+                            out.write(line)
+                            out.flush()
+                    out.write(f"[INFO] stderr pump: subprocess stderr closed\n")
+                    out.flush()
+            except Exception as exc:
+                try:
+                    with open(stderr_path, "a", encoding="utf-8", errors="replace") as out:
+                        out.write(f"[ERROR] unity_bridge: stderr pump exception: {exc!r}\n")
+                        import traceback
+                        out.write(f"{traceback.format_exc()}\n")
+                        out.flush()
+                except Exception:
+                    pass
+            finally:
+                try:
+                    if proc.stderr is not None:
+                        proc.stderr.close()
+                except Exception:
+                    pass
+
+        threading.Thread(target=_pump_gvm_stderr, daemon=True, name="gvm-stderr-pump").start()
+
         waited = 0.0
-        heartbeat_s = 5.0
-        timeout_s = 300.0
+        poll_s = 1.0
+        heartbeat_log_s = 20.0
+        last_status_emit = ""
+        last_progress_emit = (-1, -1, "")
+        since_status_log = 0.0
         last_count = -1
+        timeout_s = 900.0  # DISABLED: GPU inference is too slow on limited VRAM
         while True:
             curr = len([n for n in os.listdir(alpha_dir) if n.lower().endswith(".png")]) if os.path.isdir(alpha_dir) else 0
             if curr != last_count:
                 last_count = curr
-                _emit({"type": "progress", "current": curr, "total": total_hint, "phase": "gvm_hint"})
+                _emit({"type": "progress", "request_id": request_id, "current": curr, "total": total_hint, "phase": "gvm_hint", "detail": f"{curr}/{total_hint} alpha PNG(s) on disk"})
+
+            if os.path.isfile(status_path):
+                try:
+                    with open(status_path, "r", encoding="utf-8") as sf:
+                        st = json.load(sf)
+                    if isinstance(st, dict):
+                        stage = str(st.get("stage") or "")
+                        detail = str(st.get("detail") or "")
+                        key = f"{stage}|{detail}"
+                        if key != last_status_emit:
+                            last_status_emit = key
+                            _emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": f"GVM [{stage}]: {detail}" if detail else f"GVM [{stage}]"})
+                        sc = st.get("current")
+                        stt = st.get("total")
+                        if isinstance(sc, int) and isinstance(stt, int) and stt > 0:
+                            if (sc, stt, stage) != last_progress_emit:
+                                last_progress_emit = (sc, stt, stage)
+                                _emit({"type": "progress", "request_id": request_id, "current": sc, "total": stt, "phase": f"gvm_{stage}", "detail": detail or f"frame {sc}/{stt}"})
+                except json.JSONDecodeError as exc:
+                    _emit({"type": "log", "level": "WARNING", "logger": "unity_bridge", "message": f"GVM status JSON invalid: {exc}; path={status_path}"})
+                except Exception as exc:
+                    _emit({"type": "log", "level": "WARNING", "logger": "unity_bridge", "message": f"GVM status read failed: {exc}; path={status_path}"})
 
             if os.path.isfile(result_path):
                 with open(result_path, "r", encoding="utf-8") as rf:
@@ -575,16 +699,8 @@ def _run_alpha_gvm_hint(
                 if not result.get("ok", False):
                     raise RuntimeError(str(result.get("message") or "gvm runner failed"))
                 alpha_count = int(result.get("alpha_count", curr))
-                _emit({"type": "progress", "current": alpha_count, "total": total_hint, "phase": "gvm_hint"})
-                _emit(
-                    {
-                        "type": "diag_result",
-                        "request_id": request_id,
-                        "diag": "gvm_hint",
-                        "ok": True,
-                        "summary": str(result.get("message") or f"GVM wrote {alpha_count} alpha hint frame(s)"),
-                    }
-                )
+                _emit({"type": "progress", "request_id": request_id, "current": alpha_count, "total": total_hint, "phase": "gvm_hint", "detail": f"{alpha_count}/{total_hint} alpha PNG(s) on disk"})
+                _emit({"type": "diag_result", "request_id": request_id, "diag": "gvm_hint", "ok": True, "summary": str(result.get("message") or f"GVM wrote {alpha_count} alpha hint frame(s)")})
                 break
 
             if proc.poll() is not None:
@@ -603,13 +719,16 @@ def _run_alpha_gvm_hint(
                     break
                 raise RuntimeError("gvm runner exited successfully but result file not found")
 
-            threading.Event().wait(heartbeat_s)
-            waited += heartbeat_s
-            _emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": f"gvm running... {int(waited)}s elapsed"})
-            _emit({"type": "progress", "current": curr, "total": total_hint, "phase": "gvm_hint_loading_v4"})
-            if waited >= timeout_s:
-                proc.kill()
-                raise RuntimeError(f"run_gvm timed out after {int(timeout_s)}s")
+            threading.Event().wait(poll_s)
+            waited += poll_s
+            since_status_log += poll_s
+            if since_status_log >= heartbeat_log_s:
+                since_status_log = 0.0
+                _emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": f"GVM still running {int(waited)}s (no/few PNGs yet); check stderr log {stderr_path}"})
+            # DISABLED: timeout commented out for slow GPU with limited VRAM
+            # if waited >= timeout_s:
+            #     proc.kill()
+            #     raise RuntimeError(f"run_gvm timed out after {int(timeout_s)}s")
 
         _emit(
             {
@@ -632,21 +751,46 @@ def _run_alpha_gvm_hint(
             }
         )
         _emit_done(cmd_name, request_id, ok=True, summary=f"alpha_hint_frames={alpha_count}")
+        success = True
     except Exception as exc:  # noqa: BLE001
         _emit({"type": "error", "message": str(exc)})
         _emit_done(cmd_name, request_id, ok=False, summary=str(exc))
     finally:
-        # Best-effort cleanup of bridge temp artifacts.
-        try:
-            if 'result_path' in locals() and os.path.isfile(result_path):
-                os.remove(result_path)
-        except Exception:
-            pass
-        try:
-            if 'bridge_tmp_dir' in locals() and os.path.isdir(bridge_tmp_dir) and not os.listdir(bridge_tmp_dir):
-                os.rmdir(bridge_tmp_dir)
-        except Exception:
-            pass
+        # Preserve temp artifacts on failure for post-mortem debugging.
+        # Always keep stderr for diagnostics.
+        if success:
+            try:
+                if 'result_path' in locals() and os.path.isfile(result_path):
+                    os.remove(result_path)
+            except Exception:
+                pass
+            try:
+                if 'status_path' in locals() and os.path.isfile(status_path):
+                    os.remove(status_path)
+            except Exception:
+                pass
+            try:
+                if 'bridge_tmp_dir' in locals() and os.path.isdir(bridge_tmp_dir) and not os.listdir(bridge_tmp_dir):
+                    os.rmdir(bridge_tmp_dir)
+            except Exception:
+                pass
+        else:
+            if 'bridge_tmp_dir' in locals() and os.path.isdir(bridge_tmp_dir):
+                _emit(
+                    {
+                        "type": "log",
+                        "level": "INFO",
+                        "logger": "unity_bridge",
+                        "message": f"GVM failure artifacts preserved in {bridge_tmp_dir}",
+                    }
+                )
+        
+        # Close any open stderr file handle
+        if stderr_file:
+            try:
+                stderr_file.close()
+            except Exception:
+                pass
 
 
 def _run_alpha_birefnet_hint(
@@ -1053,6 +1197,14 @@ def _dispatch(msg: dict) -> bool:
     """Return False when the stdin loop should exit (shutdown)."""
     cmd = msg.get("cmd")
     rid = (msg.get("request_id") or "").strip()
+    _emit(
+        {
+            "type": "log",
+            "level": "DEBUG",
+            "logger": "unity_bridge",
+            "message": f"[_dispatch] cmd={cmd!r} request_id={rid!r}",
+        }
+    )
 
     if cmd == "health":
         _cmd_health()
@@ -1103,11 +1255,27 @@ def _dispatch(msg: dict) -> bool:
         clip_root = msg.get("clip_root") or ""
         frames_dir = msg.get("frames_dir") or ""
         overwrite = bool(msg.get("overwrite", False))
+        _emit(
+            {
+                "type": "log",
+                "level": "INFO",
+                "logger": "unity_bridge",
+                "message": f"[DISPATCH] alpha.gvm_hint request_id={rid} clip_root={clip_root!r} frames_dir={frames_dir!r} overwrite={overwrite}",
+            }
+        )
         threading.Thread(
             target=_run_alpha_gvm_hint,
             args=(rid, clip_root, frames_dir, overwrite),
             daemon=True,
         ).start()
+        _emit(
+            {
+                "type": "log",
+                "level": "INFO",
+                "logger": "unity_bridge",
+                "message": f"[DISPATCH] alpha.gvm_hint thread spawned for request_id={rid}",
+            }
+        )
         return True
     if cmd == "alpha.birefnet_hint":
         clip_root = msg.get("clip_root") or ""
@@ -1146,6 +1314,14 @@ def main() -> None:
         line = line.strip()
         if not line:
             continue
+        _emit(
+            {
+                "type": "log",
+                "level": "DEBUG",
+                "logger": "unity_bridge",
+                "message": f"[stdin] received line: {line[:200]!r}",
+            }
+        )
         try:
             msg = json.loads(line)
         except json.JSONDecodeError as exc:

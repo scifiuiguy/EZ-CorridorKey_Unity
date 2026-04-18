@@ -72,6 +72,7 @@ namespace CorridorKey.Editor.UI
         readonly VisualElement _performanceSectionBody;
 
         readonly BiRefNetViewerIntegration? _biRefNetIntegration;
+        readonly GvmViewerIntegration? _gvmViewerIntegration;
         readonly QueuePresenter? _queuePresenter;
 
         bool _advancedExpanded;
@@ -89,9 +90,11 @@ namespace CorridorKey.Editor.UI
         public ParametersRailController(
             VisualElement root,
             BiRefNetViewerIntegration? biRefNetIntegration = null,
+            GvmViewerIntegration? gvmViewerIntegration = null,
             QueuePresenter? queuePresenter = null)
         {
             _biRefNetIntegration = biRefNetIntegration;
+            _gvmViewerIntegration = gvmViewerIntegration;
             _queuePresenter = queuePresenter;
             _modeAutoBtn = root.Q<Button>("parameters-toggle-auto")
                            ?? throw new System.InvalidOperationException("parameters-toggle-auto");
@@ -213,8 +216,7 @@ namespace CorridorKey.Editor.UI
                 return;
             if (!evt.newValue)
                 return;
-            ApplyAlphaHintSource(true);
-            ActivateGvmAlphaHint();
+            OnGvmAutoClicked();
         }
 
         void OnAlphaHintRadioBirefChanged(ChangeEvent<bool> evt)
@@ -223,8 +225,7 @@ namespace CorridorKey.Editor.UI
                 return;
             if (!evt.newValue)
                 return;
-            ApplyAlphaHintSource(false);
-            ActivateBiRefNetAlphaHint();
+            OnBiRefNetClicked();
         }
 
         /// <summary>Sets the GVM vs BiRefNet radios (BiRefNet is default).</summary>
@@ -242,10 +243,15 @@ namespace CorridorKey.Editor.UI
             }
         }
 
-        /// <summary>Same work as clicking GVM AUTO (bridge hook).</summary>
-        void ActivateGvmAlphaHint()
+        void ActivateGvmAlphaHintWithQueue(QueueJobVm vm)
         {
-            Debug.Log("[CorridorKey] GVM AUTO clicked.");
+            if (_gvmViewerIntegration != null)
+            {
+                _gvmViewerIntegration.RequestGvmForDefaultClip(vm);
+                return;
+            }
+
+            Debug.Log("[CorridorKey] GVM: no integration (open CorridorKey window with backend).");
         }
 
         /// <summary>BiRefNet bridge <c>usage</c> from the model dropdown at activation time (selected index is authoritative).</summary>
@@ -267,22 +273,12 @@ namespace CorridorKey.Editor.UI
             return string.IsNullOrWhiteSpace(v) ? BiRefNetModelOptions.DefaultDisplayName : v.Trim();
         }
 
-        /// <summary>Same work as clicking BIREFNET (bridge hook).</summary>
-        void ActivateBiRefNetAlphaHint()
-        {
-            if (_biRefNetIntegration != null)
-            {
-                _biRefNetIntegration.RequestBiRefNetForDefaultClip(CurrentBiRefNetUsageForBridge());
-                return;
-            }
-
-            Debug.Log($"[CorridorKey] BIREFNET clicked (no integration). Model: {CurrentBiRefNetUsageForBridge()}");
-        }
-
         void OnGvmAutoClicked()
         {
             ApplyAlphaHintSource(true);
-            ActivateGvmAlphaHint();
+            var vm = GvmAlphaHintQueueJob.CreateJobVm();
+            _queuePresenter?.Enqueue(vm);
+            ActivateGvmAlphaHintWithQueue(vm);
         }
 
         void OnBiRefNetClicked()

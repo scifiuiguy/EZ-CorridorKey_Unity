@@ -45,6 +45,7 @@ namespace CorridorKey.Editor
         GpuMeterHeaderController? _gpuMeterHeader;
 
         BiRefNetViewerIntegration? _biRefNetViewerIntegration;
+        GvmViewerIntegration? _gvmViewerIntegration;
 
         DualViewerChromeController? _dualViewerChrome;
 
@@ -103,6 +104,8 @@ namespace CorridorKey.Editor
 
             _biRefNetViewerIntegration?.Dispose();
             _biRefNetViewerIntegration = null;
+            _gvmViewerIntegration?.Dispose();
+            _gvmViewerIntegration = null;
 
             if (_playheadStrip != null)
             {
@@ -174,6 +177,8 @@ namespace CorridorKey.Editor
             _gpuMeterHeader = null;
             _biRefNetViewerIntegration?.Dispose();
             _biRefNetViewerIntegration = null;
+            _gvmViewerIntegration?.Dispose();
+            _gvmViewerIntegration = null;
             if (_playheadStrip != null)
             {
                 _playheadStrip.FrameChanged -= OnPlayheadFrameChanged;
@@ -268,6 +273,13 @@ namespace CorridorKey.Editor
                     _gpuAbComparisonRenderer,
                     _dualViewerChrome,
                     onQueueJobFailed: (vm, detail) => _queuePresenter?.FailJob(vm, detail));
+                _gvmViewerIntegration = new GvmViewerIntegration(
+                    _backend,
+                    body,
+                    _sampleAbComparisonRenderer,
+                    _gpuAbComparisonRenderer,
+                    _dualViewerChrome,
+                    onQueueJobFailed: (vm, detail) => _queuePresenter?.FailJob(vm, detail));
             }
 
             _dualViewerChrome.AbToggled += on =>
@@ -287,7 +299,7 @@ namespace CorridorKey.Editor
             _playheadStrip.FrameChanged += OnPlayheadFrameChanged;
             WirePlayheadFromDefaultTestClip();
 
-            _ = new ParametersRailController(body, _biRefNetViewerIntegration, _queuePresenter);
+            _ = new ParametersRailController(body, _biRefNetViewerIntegration, _gvmViewerIntegration, _queuePresenter);
 
             body.Q<Button>("status-run-selected")?.RegisterCallback<ClickEvent>(_ =>
                 Debug.Log("[CorridorKey] RUN SELECTED clicked."));
