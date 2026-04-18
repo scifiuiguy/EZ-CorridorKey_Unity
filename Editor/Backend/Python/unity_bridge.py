@@ -33,58 +33,10 @@ import threading
 import traceback
 from datetime import datetime, timezone
 
-BRIDGE_VERSION = "unity_bridge_birefnet_v3"
-
-
-def _emit(obj: dict) -> None:
-    print(json.dumps(obj, ensure_ascii=False, separators=(",", ":")), flush=True)
-
-
-def _emit_log_lines(text: str, logger: str = "unity_bridge", max_line_len: int = 3500) -> None:
-    """Emit multi-line text as separate log NDJSON lines (Unity JsonUtility is fragile on huge single fields)."""
-    if not text:
-        _emit({"type": "log", "level": "INFO", "logger": logger, "message": "(empty)"})
-        return
-    for raw_line in text.splitlines():
-        remaining = raw_line
-        while remaining:
-            chunk = remaining[:max_line_len]
-            remaining = remaining[max_line_len:]
-            _emit({"type": "log", "level": "INFO", "logger": logger, "message": chunk})
-
-
-def _emit_done(cmd: str, request_id: str, ok: bool = True, summary: str | None = None) -> None:
-    d: dict = {"type": "done", "cmd": cmd, "ok": ok}
-    if request_id:
-        d["request_id"] = request_id
-    if summary is not None:
-        d["summary"] = summary
-    _emit(d)
-
-
-def _read_text_file_tail(path: str, max_bytes: int = 12000) -> str:
-    """Last ~max_bytes of a text file (for subprocess stderr logs)."""
-    try:
-        with open(path, "rb") as f:
-            f.seek(0, os.SEEK_END)
-            sz = f.tell()
-            if sz <= 0:
-                return ""
-            if sz <= max_bytes:
-                f.seek(0)
-            else:
-                f.seek(sz - max_bytes)
-            return f.read().decode("utf-8", errors="replace")
-    except OSError:
-        return ""
-
-
-def _birefnet_append_stderr(base: str, stderr_path: str) -> str:
-    if stderr_path and os.path.isfile(stderr_path):
-        tail = _read_text_file_tail(stderr_path).strip()
-        if tail:
-            return f"{base}\n--- birefnet stderr (tail; full log: {stderr_path}) ---\n{tail}"
-    return base
+try:
+    from . import bridge_core
+except ImportError:
+    import bridge_core
 
 
 def _cmd_health() -> None:
@@ -93,7 +45,7 @@ def _cmd_health() -> None:
 
         result = validate_ffmpeg_install(require_probe=True)
         if not result.ok:
-            _emit(
+            bridge_core._emit(
                 {
                     "type": "health",
                     "ok": False,
@@ -103,7 +55,7 @@ def _cmd_health() -> None:
             return
 
         py = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-        _emit(
+        bridge_core._emit(
             {
                 "type": "health",
                 "ok": True,
@@ -112,7 +64,7 @@ def _cmd_health() -> None:
         )
     except Exception as exc:  # noqa: BLE001 — bridge must never crash the process
         tb = traceback.format_exc()
-        _emit(
+        bridge_core._emit(
             {
                 "type": "log",
                 "level": "ERROR",
@@ -120,7 +72,7 @@ def _cmd_health() -> None:
                 "logger": "unity_bridge",
             }
         )
-        _emit(
+        bridge_core._emit(
             {
                 "type": "health",
                 "ok": False,
@@ -135,7 +87,7 @@ def _run_diag_python(request_id: str) -> None:
             f"version={sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}; "
             f"executable={sys.executable}; cwd={os.getcwd()}"
         )
-        _emit(
+        bridge_core._emit(
             {
                 "type": "diag_result",
                 "request_id": request_id,
@@ -144,9 +96,9 @@ def _run_diag_python(request_id: str) -> None:
                 "summary": summary,
             }
         )
-        _emit_done("diag.python", request_id, ok=True)
+        bridge_core._emit_done("diag.python", request_id, ok=True)
     except Exception as exc:  # noqa: BLE001
-        _emit(
+        bridge_core._emit(
             {
                 "type": "diag_result",
                 "request_id": request_id,
@@ -155,7 +107,7 @@ def _run_diag_python(request_id: str) -> None:
                 "summary": str(exc),
             }
         )
-        _emit_done("diag.python", request_id, ok=False, summary=str(exc))
+        bridge_core._emit_done("diag.python", request_id, ok=False, summary=str(exc))
 
 
 def _run_diag_imports(request_id: str) -> None:
@@ -163,7 +115,7 @@ def _run_diag_imports(request_id: str) -> None:
         import importlib
 
         importlib.import_module("backend")
-        _emit(
+        bridge_core._emit(
             {
                 "type": "diag_result",
                 "request_id": request_id,
@@ -172,10 +124,10 @@ def _run_diag_imports(request_id: str) -> None:
                 "summary": "import backend: ok",
             }
         )
-        _emit_done("diag.imports", request_id, ok=True)
+        bridge_core._emit_done("diag.imports", request_id, ok=True)
     except Exception as exc:  # noqa: BLE001
         tb = traceback.format_exc()
-        _emit(
+        bridge_core._emit(
             {
                 "type": "diag_result",
                 "request_id": request_id,
@@ -184,14 +136,14 @@ def _run_diag_imports(request_id: str) -> None:
                 "summary": f"{exc}\n{tb}",
             }
         )
-        _emit_done("diag.imports", request_id, ok=False, summary=str(exc))
+        bridge_core._emit_done("diag.imports", request_id, ok=False, summary=str(exc))
 
 
 def _run_diag_ffmpeg_version(request_id: str) -> None:
     try:
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
-            _emit(
+            bridge_core._emit(
                 {
                     "type": "diag_result",
                     "request_id": request_id,
@@ -200,7 +152,7 @@ def _run_diag_ffmpeg_version(request_id: str) -> None:
                     "summary": "ffmpeg not found on PATH",
                 }
             )
-            _emit_done("diag.ffmpeg_version", request_id, ok=False, summary="ffmpeg not found on PATH")
+            bridge_core._emit_done("diag.ffmpeg_version", request_id, ok=False, summary="ffmpeg not found on PATH")
             return
         proc = subprocess.run(
             [ffmpeg, "-version"],
@@ -212,7 +164,7 @@ def _run_diag_ffmpeg_version(request_id: str) -> None:
         out = (proc.stdout or proc.stderr or "").strip()
         first = out.splitlines()[0] if out else "(no output)"
         ok = proc.returncode == 0
-        _emit(
+        bridge_core._emit(
             {
                 "type": "diag_result",
                 "request_id": request_id,
@@ -221,9 +173,9 @@ def _run_diag_ffmpeg_version(request_id: str) -> None:
                 "summary": f"{ffmpeg} -> {first}",
             }
         )
-        _emit_done("diag.ffmpeg_version", request_id, ok=ok, summary=first if not ok else None)
+        bridge_core._emit_done("diag.ffmpeg_version", request_id, ok=ok, summary=first if not ok else None)
     except Exception as exc:  # noqa: BLE001
-        _emit(
+        bridge_core._emit(
             {
                 "type": "diag_result",
                 "request_id": request_id,
@@ -232,14 +184,14 @@ def _run_diag_ffmpeg_version(request_id: str) -> None:
                 "summary": str(exc),
             }
         )
-        _emit_done("diag.ffmpeg_version", request_id, ok=False, summary=str(exc))
+        bridge_core._emit_done("diag.ffmpeg_version", request_id, ok=False, summary=str(exc))
 
 
 def _run_diag_file_exists(request_id: str, path: str) -> None:
     try:
         path = (path or "").strip()
         if not path:
-            _emit(
+            bridge_core._emit(
                 {
                     "type": "diag_result",
                     "request_id": request_id,
@@ -248,7 +200,7 @@ def _run_diag_file_exists(request_id: str, path: str) -> None:
                     "summary": "missing path",
                 }
             )
-            _emit_done("diag.file_exists", request_id, ok=False, summary="missing path")
+            bridge_core._emit_done("diag.file_exists", request_id, ok=False, summary="missing path")
             return
         exists = os.path.isfile(path)
         try:
@@ -256,7 +208,7 @@ def _run_diag_file_exists(request_id: str, path: str) -> None:
         except OSError:
             size = -1
         summary = f"path={path!r}; isfile={exists}; size={size}"
-        _emit(
+        bridge_core._emit(
             {
                 "type": "diag_result",
                 "request_id": request_id,
@@ -265,9 +217,9 @@ def _run_diag_file_exists(request_id: str, path: str) -> None:
                 "summary": summary,
             }
         )
-        _emit_done("diag.file_exists", request_id, ok=exists, summary=summary if not exists else None)
+        bridge_core._emit_done("diag.file_exists", request_id, ok=exists, summary=summary if not exists else None)
     except Exception as exc:  # noqa: BLE001
-        _emit(
+        bridge_core._emit(
             {
                 "type": "diag_result",
                 "request_id": request_id,
@@ -276,11 +228,11 @@ def _run_diag_file_exists(request_id: str, path: str) -> None:
                 "summary": str(exc),
             }
         )
-        _emit_done("diag.file_exists", request_id, ok=False, summary=str(exc))
+        bridge_core._emit_done("diag.file_exists", request_id, ok=False, summary=str(exc))
 
 
 def _run_diag_birefnet(request_id: str, usage: str) -> None:
-    _emit(
+    bridge_core._emit(
         {
             "type": "log",
             "level": "INFO",
@@ -296,11 +248,11 @@ def _run_diag_birefnet(request_id: str, usage: str) -> None:
 
         ok, report = format_full_report(usage or "Matting")
         # Full report as log lines — putting multi-KB strings in diag_result breaks Unity JsonUtility (empty type, silent drop).
-        _emit_log_lines(report, logger="diag.birefnet")
+        bridge_core._emit_log_lines(report, logger="diag.birefnet")
         short_summary = (
             f"ok={ok}; full checkpoint report above ({len(report)} chars in {report.count(chr(10)) + 1} lines)"
         )
-        _emit(
+        bridge_core._emit(
             {
                 "type": "diag_result",
                 "request_id": request_id,
@@ -309,7 +261,7 @@ def _run_diag_birefnet(request_id: str, usage: str) -> None:
                 "summary": short_summary,
             }
         )
-        _emit_done(
+        bridge_core._emit_done(
             "diag.birefnet",
             request_id,
             ok=ok,
@@ -317,8 +269,8 @@ def _run_diag_birefnet(request_id: str, usage: str) -> None:
         )
     except Exception as exc:  # noqa: BLE001
         tb = traceback.format_exc()
-        _emit_log_lines(f"{exc}\n{tb}", logger="diag.birefnet")
-        _emit(
+        bridge_core._emit_log_lines(f"{exc}\n{tb}", logger="diag.birefnet")
+        bridge_core._emit(
             {
                 "type": "diag_result",
                 "request_id": request_id,
@@ -327,7 +279,127 @@ def _run_diag_birefnet(request_id: str, usage: str) -> None:
                 "summary": f"exception: {exc}",
             }
         )
-        _emit_done("diag.birefnet", request_id, ok=False, summary=str(exc))
+        bridge_core._emit_done("diag.birefnet", request_id, ok=False, summary=str(exc))
+
+
+def _run_model_download_gvm(request_id: str) -> None:
+    cmd_name = "model.download_gvm"
+    try:
+        # Import setup_models dynamically like EZ UI does
+        import importlib.util
+        script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "R", "scripts", "setup_models.py")
+        if not os.path.isfile(script_path):
+            raise RuntimeError(f"setup_models.py not found at {script_path}")
+        spec = importlib.util.spec_from_file_location("setup_models", script_path)
+        setup_models = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(setup_models)
+        
+        bridge_core._emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": f"Downloading GVM model..."})
+        ok = setup_models.download_model("gvm")
+        summary = "GVM model downloaded successfully" if ok else "GVM model download failed"
+        bridge_core._emit({"type": "diag_result", "request_id": request_id, "diag": "download_gvm", "ok": ok, "summary": summary})
+        bridge_core._emit_done(cmd_name, request_id, ok=ok, summary=summary)
+    except Exception as exc:
+        bridge_core._emit({"type": "error", "message": str(exc)})
+        bridge_core._emit_done(cmd_name, request_id, ok=False, summary=str(exc))
+
+
+def _run_model_download_sam2(request_id: str, model_name: str = "base-plus") -> None:
+    cmd_name = "model.download_sam2"
+    try:
+        # Import setup_models dynamically like EZ UI does
+        import importlib.util
+        script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "R", "scripts", "setup_models.py")
+        if not os.path.isfile(script_path):
+            raise RuntimeError(f"setup_models.py not found at {script_path}")
+        spec = importlib.util.spec_from_file_location("setup_models", script_path)
+        setup_models = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(setup_models)
+        
+        bridge_core._emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": f"Downloading SAM2 {model_name} model..."})
+        ok = setup_models.download_sam2_model(model_name)
+        summary = f"SAM2 {model_name} model downloaded successfully" if ok else f"SAM2 {model_name} model download failed"
+        bridge_core._emit({"type": "diag_result", "request_id": request_id, "diag": "download_sam2", "ok": ok, "summary": summary})
+        bridge_core._emit_done(cmd_name, request_id, ok=ok, summary=summary)
+    except Exception as exc:
+        bridge_core._emit({"type": "error", "message": str(exc)})
+        bridge_core._emit_done(cmd_name, request_id, ok=False, summary=str(exc))
+
+
+def _run_model_download_videomama(request_id: str) -> None:
+    cmd_name = "model.download_videomama"
+    try:
+        # Import setup_models dynamically like EZ UI does
+        import importlib.util
+        script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "R", "scripts", "setup_models.py")
+        if not os.path.isfile(script_path):
+            raise RuntimeError(f"setup_models.py not found at {script_path}")
+        spec = importlib.util.spec_from_file_location("setup_models", script_path)
+        setup_models = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(setup_models)
+        
+        bridge_core._emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": f"Downloading VideoMaMa model..."})
+        ok = setup_models.download_model("videomama")
+        summary = "VideoMaMa model downloaded successfully" if ok else "VideoMaMa model download failed"
+        bridge_core._emit({"type": "diag_result", "request_id": request_id, "diag": "download_videomama", "ok": ok, "summary": summary})
+        bridge_core._emit_done(cmd_name, request_id, ok=ok, summary=summary)
+    except Exception as exc:
+        bridge_core._emit({"type": "error", "message": str(exc)})
+        bridge_core._emit_done(cmd_name, request_id, ok=False, summary=str(exc))
+
+
+def _run_model_check_status(request_id: str) -> None:
+    cmd_name = "model.check_status"
+    try:
+        # Import setup_models dynamically like EZ UI does
+        import importlib.util
+        script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "R", "scripts", "setup_models.py")
+        if not os.path.isfile(script_path):
+            raise RuntimeError(f"setup_models.py not found at {script_path}")
+        spec = importlib.util.spec_from_file_location("setup_models", script_path)
+        setup_models = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(setup_models)
+        
+        bridge_core._emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": "Checking model status..."})
+        # Capture the output of check_all
+        import io
+        from contextlib import redirect_stdout
+        f = io.StringIO()
+        with redirect_stdout(f):
+            setup_models.check_all()
+        output = f.getvalue()
+        bridge_core._emit_log_lines(output, logger="model_status")
+        bridge_core._emit({"type": "diag_result", "request_id": request_id, "diag": "model_status", "ok": True, "summary": "Model status check completed"})
+        bridge_core._emit_done(cmd_name, request_id, ok=True)
+    except Exception as exc:
+        bridge_core._emit({"type": "error", "message": str(exc)})
+        bridge_core._emit_done(cmd_name, request_id, ok=False, summary=str(exc))
+
+
+def _run_model_is_installed(request_id: str, model_name: str) -> None:
+    cmd_name = "model.is_installed"
+    try:
+        # Import setup_models dynamically like EZ UI does
+        import importlib.util
+        script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "R", "scripts", "setup_models.py")
+        if not os.path.isfile(script_path):
+            raise RuntimeError(f"setup_models.py not found at {script_path}")
+        spec = importlib.util.spec_from_file_location("setup_models", script_path)
+        setup_models = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(setup_models)
+        
+        if model_name == "sam2":
+            # For SAM2, check if base-plus is installed
+            installed = setup_models.is_sam2_installed("base-plus")
+        else:
+            installed = setup_models.is_installed(model_name)
+        
+        summary = f"{model_name} is {'installed' if installed else 'not installed'}"
+        bridge_core._emit({"type": "diag_result", "request_id": request_id, "diag": "is_installed", "ok": installed, "summary": summary})
+        bridge_core._emit_done(cmd_name, request_id, ok=installed, summary=summary)
+    except Exception as exc:
+        bridge_core._emit({"type": "error", "message": str(exc)})
+        bridge_core._emit_done(cmd_name, request_id, ok=False, summary=str(exc))
 
 
 def _probe_total_frames(input_path: str) -> int:
@@ -403,28 +475,28 @@ def _run_media_extract_frames(request_id: str, input_path: str, output_dir: str,
         output_dir = os.path.abspath((output_dir or "").strip())
         if not input_path or not output_dir:
             msg = "input_path and output_dir are required"
-            _emit({"type": "error", "message": msg})
-            _emit_done(cmd_name, request_id, ok=False, summary=msg)
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
             return
         if not os.path.isfile(input_path):
             msg = f"input file not found: {input_path}"
-            _emit({"type": "error", "message": msg})
-            _emit_done(cmd_name, request_id, ok=False, summary=msg)
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
             return
 
         os.makedirs(output_dir, exist_ok=True)
         existing = [n for n in os.listdir(output_dir) if n.lower().endswith(".png")]
         if existing and not overwrite:
             msg = f"output has existing frames ({len(existing)}); set overwrite=true to replace"
-            _emit({"type": "error", "message": msg})
-            _emit_done(cmd_name, request_id, ok=False, summary=msg)
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
             return
 
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
             msg = "ffmpeg not found on PATH"
-            _emit({"type": "error", "message": msg})
-            _emit_done(cmd_name, request_id, ok=False, summary=msg)
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
             return
 
         total = _probe_total_frames(input_path)
@@ -433,7 +505,7 @@ def _run_media_extract_frames(request_id: str, input_path: str, output_dir: str,
         args.append("-y" if overwrite else "-n")
         args.extend(["-i", input_path, out_pattern])
 
-        _emit(
+        bridge_core._emit(
             {
                 "type": "log",
                 "level": "INFO",
@@ -452,18 +524,18 @@ def _run_media_extract_frames(request_id: str, input_path: str, output_dir: str,
         )
         code = run.returncode or 0
         final_count = len([n for n in os.listdir(output_dir) if n.lower().endswith(".png")])
-        _emit({"type": "progress", "current": final_count, "total": total, "phase": "extract_frames"})
+        bridge_core._emit({"type": "progress", "current": final_count, "total": total, "phase": "extract_frames"})
 
         if code != 0:
             stderr = (run.stderr or "").strip()
             msg = stderr.splitlines()[-1] if stderr else f"ffmpeg failed (exit {code})"
-            _emit({"type": "error", "message": msg})
-            _emit_done(cmd_name, request_id, ok=False, summary=msg)
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
             return
 
         clip_dir = os.path.dirname(output_dir.rstrip("\\/"))
         _write_clip_json(clip_dir, input_path, output_dir, final_count)
-        _emit(
+        bridge_core._emit(
             {
                 "type": "diag_result",
                 "request_id": request_id,
@@ -472,10 +544,10 @@ def _run_media_extract_frames(request_id: str, input_path: str, output_dir: str,
                 "summary": f"wrote {final_count} frames to {output_dir}",
             }
         )
-        _emit_done(cmd_name, request_id, ok=True, summary=f"frames={final_count}")
+        bridge_core._emit_done(cmd_name, request_id, ok=True, summary=f"frames={final_count}")
     except Exception as exc:  # noqa: BLE001
-        _emit({"type": "error", "message": str(exc)})
-        _emit_done(cmd_name, request_id, ok=False, summary=str(exc))
+        bridge_core._emit({"type": "error", "message": str(exc)})
+        bridge_core._emit_done(cmd_name, request_id, ok=False, summary=str(exc))
 
 
 def _run_alpha_gvm_hint(
@@ -510,28 +582,28 @@ def _run_alpha_gvm_hint(
                 stderr_file.write(f"[RESOLVED] frames_dir={frames_dir}\n")
                 stderr_file.flush()
             except Exception as e:
-                _emit({"type": "log", "level": "WARNING", "logger": "unity_bridge", "message": f"GVM: could not open early stderr log: {e}"})
+                bridge_core._emit({"type": "log", "level": "WARNING", "logger": "unity_bridge", "message": f"GVM: could not open early stderr log: {e}"})
         
         if not clip_root or not frames_dir:
             msg = "clip_root and frames_dir are required"
-            _emit({"type": "error", "message": msg})
-            _emit_done(cmd_name, request_id, ok=False, summary=msg)
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
             return
         if not os.path.isdir(clip_root):
             msg = f"clip_root not found: {clip_root}"
-            _emit({"type": "error", "message": msg})
-            _emit_done(cmd_name, request_id, ok=False, summary=msg)
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
             return
         if not os.path.isdir(frames_dir):
             msg = f"frames_dir not found: {frames_dir}"
-            _emit({"type": "error", "message": msg})
-            _emit_done(cmd_name, request_id, ok=False, summary=msg)
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
             return
         frame_files = [n for n in os.listdir(frames_dir) if n.lower().endswith((".png", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".bmp", ".webp"))]
         if not frame_files:
             msg = f"frames_dir has no image frames: {frames_dir}"
-            _emit({"type": "error", "message": msg})
-            _emit_done(cmd_name, request_id, ok=False, summary=msg)
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
             return
 
         alpha_dir = os.path.join(clip_root, "AlphaHint")
@@ -539,14 +611,14 @@ def _run_alpha_gvm_hint(
             existing_alpha = [n for n in os.listdir(alpha_dir) if n.lower().endswith(".png")]
             if existing_alpha and not overwrite:
                 msg = f"AlphaHint already has {len(existing_alpha)} PNGs; set overwrite=true to replace"
-                _emit({"type": "error", "message": msg})
-                _emit_done(cmd_name, request_id, ok=False, summary=msg)
+                bridge_core._emit({"type": "error", "message": msg})
+                bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
                 return
             if existing_alpha and overwrite:
                 shutil.rmtree(alpha_dir, ignore_errors=True)
         os.makedirs(alpha_dir, exist_ok=True)
 
-        _emit(
+        bridge_core._emit(
             {
                 "type": "log",
                 "level": "INFO",
@@ -584,7 +656,7 @@ def _run_alpha_gvm_hint(
             pass
         if not os.path.isfile(runner_path):
             raise RuntimeError(f"runner script not found: {runner_path}")
-        _emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": "gvm stage: start runner subprocess"})
+        bridge_core._emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": "gvm stage: start runner subprocess"})
         popen_kw: dict = {
             "stdout": subprocess.DEVNULL,
             "stdin": subprocess.DEVNULL,
@@ -612,7 +684,7 @@ def _run_alpha_gvm_hint(
                 log.write(f"[INFO] args: status_path={status_path}\n")
                 log.flush()
         except Exception as e:
-            _emit({"type": "log", "level": "WARNING", "logger": "unity_bridge", "message": f"GVM: could not log subprocess startup: {e}"})
+            bridge_core._emit({"type": "log", "level": "WARNING", "logger": "unity_bridge", "message": f"GVM: could not log subprocess startup: {e}"})
         
         proc = subprocess.Popen(
             [
@@ -627,7 +699,7 @@ def _run_alpha_gvm_hint(
             ],
             **popen_kw,
         )
-        _emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": f"gvm runner pid={proc.pid} script={runner_path}; stderr -> {stderr_path}"})
+        bridge_core._emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": f"gvm runner pid={proc.pid} script={runner_path}; stderr -> {stderr_path}"})
 
         def _pump_gvm_stderr() -> None:
             try:
@@ -669,7 +741,7 @@ def _run_alpha_gvm_hint(
             curr = len([n for n in os.listdir(alpha_dir) if n.lower().endswith(".png")]) if os.path.isdir(alpha_dir) else 0
             if curr != last_count:
                 last_count = curr
-                _emit({"type": "progress", "request_id": request_id, "current": curr, "total": total_hint, "phase": "gvm_hint", "detail": f"{curr}/{total_hint} alpha PNG(s) on disk"})
+                bridge_core._emit({"type": "progress", "request_id": request_id, "current": curr, "total": total_hint, "phase": "gvm_hint", "detail": f"{curr}/{total_hint} alpha PNG(s) on disk"})
 
             if os.path.isfile(status_path):
                 try:
@@ -681,17 +753,17 @@ def _run_alpha_gvm_hint(
                         key = f"{stage}|{detail}"
                         if key != last_status_emit:
                             last_status_emit = key
-                            _emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": f"GVM [{stage}]: {detail}" if detail else f"GVM [{stage}]"})
+                            bridge_core._emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": f"GVM [{stage}]: {detail}" if detail else f"GVM [{stage}]"})
                         sc = st.get("current")
                         stt = st.get("total")
                         if isinstance(sc, int) and isinstance(stt, int) and stt > 0:
                             if (sc, stt, stage) != last_progress_emit:
                                 last_progress_emit = (sc, stt, stage)
-                                _emit({"type": "progress", "request_id": request_id, "current": sc, "total": stt, "phase": f"gvm_{stage}", "detail": detail or f"frame {sc}/{stt}"})
+                                bridge_core._emit({"type": "progress", "request_id": request_id, "current": sc, "total": stt, "phase": f"gvm_{stage}", "detail": detail or f"frame {sc}/{stt}"})
                 except json.JSONDecodeError as exc:
-                    _emit({"type": "log", "level": "WARNING", "logger": "unity_bridge", "message": f"GVM status JSON invalid: {exc}; path={status_path}"})
+                    bridge_core._emit({"type": "log", "level": "WARNING", "logger": "unity_bridge", "message": f"GVM status JSON invalid: {exc}; path={status_path}"})
                 except Exception as exc:
-                    _emit({"type": "log", "level": "WARNING", "logger": "unity_bridge", "message": f"GVM status read failed: {exc}; path={status_path}"})
+                    bridge_core._emit({"type": "log", "level": "WARNING", "logger": "unity_bridge", "message": f"GVM status read failed: {exc}; path={status_path}"})
 
             if os.path.isfile(result_path):
                 with open(result_path, "r", encoding="utf-8") as rf:
@@ -699,8 +771,8 @@ def _run_alpha_gvm_hint(
                 if not result.get("ok", False):
                     raise RuntimeError(str(result.get("message") or "gvm runner failed"))
                 alpha_count = int(result.get("alpha_count", curr))
-                _emit({"type": "progress", "request_id": request_id, "current": alpha_count, "total": total_hint, "phase": "gvm_hint", "detail": f"{alpha_count}/{total_hint} alpha PNG(s) on disk"})
-                _emit({"type": "diag_result", "request_id": request_id, "diag": "gvm_hint", "ok": True, "summary": str(result.get("message") or f"GVM wrote {alpha_count} alpha hint frame(s)")})
+                bridge_core._emit({"type": "progress", "request_id": request_id, "current": alpha_count, "total": total_hint, "phase": "gvm_hint", "detail": f"{alpha_count}/{total_hint} alpha PNG(s) on disk"})
+                bridge_core._emit({"type": "diag_result", "request_id": request_id, "diag": "gvm_hint", "ok": True, "summary": str(result.get("message") or f"GVM wrote {alpha_count} alpha hint frame(s)")})
                 break
 
             if proc.poll() is not None:
@@ -724,13 +796,13 @@ def _run_alpha_gvm_hint(
             since_status_log += poll_s
             if since_status_log >= heartbeat_log_s:
                 since_status_log = 0.0
-                _emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": f"GVM still running {int(waited)}s (no/few PNGs yet); check stderr log {stderr_path}"})
+                bridge_core._emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": f"GVM still running {int(waited)}s (no/few PNGs yet); check stderr log {stderr_path}"})
             # DISABLED: timeout commented out for slow GPU with limited VRAM
             # if waited >= timeout_s:
             #     proc.kill()
             #     raise RuntimeError(f"run_gvm timed out after {int(timeout_s)}s")
 
-        _emit(
+        bridge_core._emit(
             {
                 "type": "log",
                 "level": "INFO",
@@ -741,7 +813,7 @@ def _run_alpha_gvm_hint(
         alpha_files = [n for n in os.listdir(alpha_dir) if n.lower().endswith(".png")]
         alpha_count = len(alpha_files)
         _update_clip_json_with_alpha(clip_root, alpha_dir, alpha_count, status="gvm_hint_generated")
-        _emit(
+        bridge_core._emit(
             {
                 "type": "diag_result",
                 "request_id": request_id,
@@ -750,11 +822,11 @@ def _run_alpha_gvm_hint(
                 "summary": f"GVM wrote {alpha_count} alpha hint frame(s) to {alpha_dir}",
             }
         )
-        _emit_done(cmd_name, request_id, ok=True, summary=f"alpha_hint_frames={alpha_count}")
+        bridge_core._emit_done(cmd_name, request_id, ok=True, summary=f"alpha_hint_frames={alpha_count}")
         success = True
     except Exception as exc:  # noqa: BLE001
-        _emit({"type": "error", "message": str(exc)})
-        _emit_done(cmd_name, request_id, ok=False, summary=str(exc))
+        bridge_core._emit({"type": "error", "message": str(exc)})
+        bridge_core._emit_done(cmd_name, request_id, ok=False, summary=str(exc))
     finally:
         # Preserve temp artifacts on failure for post-mortem debugging.
         # Always keep stderr for diagnostics.
@@ -776,7 +848,7 @@ def _run_alpha_gvm_hint(
                 pass
         else:
             if 'bridge_tmp_dir' in locals() and os.path.isdir(bridge_tmp_dir):
-                _emit(
+                bridge_core._emit(
                     {
                         "type": "log",
                         "level": "INFO",
@@ -808,24 +880,24 @@ def _run_alpha_birefnet_hint(
         usage = (usage or "Matting").strip() or "Matting"
         if not clip_root or not frames_dir:
             msg = "clip_root and frames_dir are required"
-            _emit({"type": "error", "message": msg})
-            _emit_done(cmd_name, request_id, ok=False, summary=msg)
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
             return
         if not os.path.isdir(clip_root):
             msg = f"clip_root not found: {clip_root}"
-            _emit({"type": "error", "message": msg})
-            _emit_done(cmd_name, request_id, ok=False, summary=msg)
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
             return
         if not os.path.isdir(frames_dir):
             msg = f"frames_dir not found: {frames_dir}"
-            _emit({"type": "error", "message": msg})
-            _emit_done(cmd_name, request_id, ok=False, summary=msg)
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
             return
         frame_files = [n for n in os.listdir(frames_dir) if n.lower().endswith((".png", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".bmp", ".webp"))]
         if not frame_files:
             msg = f"frames_dir has no image frames: {frames_dir}"
-            _emit({"type": "error", "message": msg})
-            _emit_done(cmd_name, request_id, ok=False, summary=msg)
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
             return
 
         alpha_dir = os.path.join(clip_root, "AlphaHint")
@@ -833,14 +905,14 @@ def _run_alpha_birefnet_hint(
             existing_alpha = [n for n in os.listdir(alpha_dir) if n.lower().endswith(".png")]
             if existing_alpha and not overwrite:
                 msg = f"AlphaHint already has {len(existing_alpha)} PNGs; set overwrite=true to replace"
-                _emit({"type": "error", "message": msg})
-                _emit_done(cmd_name, request_id, ok=False, summary=msg)
+                bridge_core._emit({"type": "error", "message": msg})
+                bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
                 return
             if existing_alpha and overwrite:
                 shutil.rmtree(alpha_dir, ignore_errors=True)
         os.makedirs(alpha_dir, exist_ok=True)
 
-        _emit(
+        bridge_core._emit(
             {
                 "type": "log",
                 "level": "INFO",
@@ -874,7 +946,7 @@ def _run_alpha_birefnet_hint(
             pass
         if not os.path.isfile(runner_path):
             raise RuntimeError(f"runner script not found: {runner_path}")
-        _emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": "birefnet stage: start runner subprocess"})
+        bridge_core._emit({"type": "log", "level": "INFO", "logger": "unity_bridge", "message": "birefnet stage: start runner subprocess"})
         # stderr=PIPE + background pump (reliable flush on Windows vs open file handle). Child stdin must not inherit the bridge pipe.
         use_stderr_pipe = bool(stderr_path)
         popen_kw: dict = {
@@ -933,7 +1005,7 @@ def _run_alpha_birefnet_hint(
                         pass
 
             threading.Thread(target=_pump_birefnet_stderr, daemon=True, name="birefnet-stderr-pump").start()
-        _emit(
+        bridge_core._emit(
             {
                 "type": "log",
                 "level": "INFO",
@@ -959,7 +1031,7 @@ def _run_alpha_birefnet_hint(
             curr = len([n for n in os.listdir(alpha_dir) if n.lower().endswith(".png")]) if os.path.isdir(alpha_dir) else 0
             if curr != last_count:
                 last_count = curr
-                _emit(
+                bridge_core._emit(
                     {
                         "type": "progress",
                         "request_id": request_id,
@@ -981,7 +1053,7 @@ def _run_alpha_birefnet_hint(
                         key = f"{stage}|{detail}"
                         if key != last_status_emit:
                             last_status_emit = key
-                            _emit(
+                            bridge_core._emit(
                                 {
                                     "type": "log",
                                     "level": "INFO",
@@ -995,7 +1067,7 @@ def _run_alpha_birefnet_hint(
                             inf_detail = detail or f"frame {sc}/{stt}"
                             if (sc, stt, stage, inf_detail) != last_progress_emit:
                                 last_progress_emit = (sc, stt, stage, inf_detail)
-                                _emit(
+                                bridge_core._emit(
                                     {
                                         "type": "progress",
                                         "request_id": request_id,
@@ -1009,7 +1081,7 @@ def _run_alpha_birefnet_hint(
                             nk = f"{stage}|{detail}"
                             if nk != last_non_inference_progress:
                                 last_non_inference_progress = nk
-                                _emit(
+                                bridge_core._emit(
                                     {
                                         "type": "progress",
                                         "request_id": request_id,
@@ -1027,13 +1099,13 @@ def _run_alpha_birefnet_hint(
                     result = json.load(rf)
                 if not result.get("ok", False):
                     raise RuntimeError(
-                        _birefnet_append_stderr(
+                        bridge_core._birefnet_append_stderr(
                             str(result.get("message") or "birefnet runner failed"),
                             stderr_path,
                         )
                     )
                 alpha_count = int(result.get("alpha_count", curr))
-                _emit(
+                bridge_core._emit(
                     {
                         "type": "progress",
                         "request_id": request_id,
@@ -1043,7 +1115,7 @@ def _run_alpha_birefnet_hint(
                         "detail": f"{alpha_count}/{total_hint} alpha PNG(s) on disk",
                     }
                 )
-                _emit(
+                bridge_core._emit(
                     {
                         "type": "diag_result",
                         "request_id": request_id,
@@ -1061,13 +1133,13 @@ def _run_alpha_birefnet_hint(
                         with open(result_path, "r", encoding="utf-8") as rf:
                             result = json.load(rf)
                         raise RuntimeError(
-                            _birefnet_append_stderr(
+                            bridge_core._birefnet_append_stderr(
                                 str(result.get("message") or f"birefnet runner exited with code {code}"),
                                 stderr_path,
                             )
                         )
                     raise RuntimeError(
-                        _birefnet_append_stderr(
+                        bridge_core._birefnet_append_stderr(
                             f"birefnet runner exited with code {code} without result file",
                             stderr_path,
                         )
@@ -1079,7 +1151,7 @@ def _run_alpha_birefnet_hint(
                 if os.path.isfile(result_path):
                     break
                 raise RuntimeError(
-                    _birefnet_append_stderr(
+                    bridge_core._birefnet_append_stderr(
                         "birefnet runner exited successfully but result file not found",
                         stderr_path,
                     )
@@ -1116,7 +1188,7 @@ def _run_alpha_birefnet_hint(
                             pass
                     if not pulse_detail:
                         pulse_detail = "waiting for runner (imports / startup)"
-                    _emit(
+                    bridge_core._emit(
                         {
                             "type": "progress",
                             "request_id": request_id,
@@ -1128,7 +1200,7 @@ def _run_alpha_birefnet_hint(
                     )
             if since_status_log >= heartbeat_log_s:
                 since_status_log = 0.0
-                _emit(
+                bridge_core._emit(
                     {
                         "type": "log",
                         "level": "INFO",
@@ -1143,13 +1215,13 @@ def _run_alpha_birefnet_hint(
             if waited >= timeout_s:
                 proc.kill()
                 raise RuntimeError(
-                    _birefnet_append_stderr(
+                    bridge_core._birefnet_append_stderr(
                         f"run_birefnet timed out after {int(timeout_s)}s (check stderr log and run diag.birefnet)",
                         stderr_path,
                     )
                 )
 
-        _emit(
+        bridge_core._emit(
             {
                 "type": "log",
                 "level": "INFO",
@@ -1160,7 +1232,7 @@ def _run_alpha_birefnet_hint(
         alpha_files = [n for n in os.listdir(alpha_dir) if n.lower().endswith(".png")]
         alpha_count = len(alpha_files)
         _update_clip_json_with_alpha(clip_root, alpha_dir, alpha_count, status="birefnet_hint_generated")
-        _emit(
+        bridge_core._emit(
             {
                 "type": "diag_result",
                 "request_id": request_id,
@@ -1169,10 +1241,10 @@ def _run_alpha_birefnet_hint(
                 "summary": f"BiRefNet wrote {alpha_count} alpha hint frame(s) to {alpha_dir}",
             }
         )
-        _emit_done(cmd_name, request_id, ok=True, summary=f"alpha_hint_frames={alpha_count}")
+        bridge_core._emit_done(cmd_name, request_id, ok=True, summary=f"alpha_hint_frames={alpha_count}")
     except Exception as exc:  # noqa: BLE001
-        _emit({"type": "error", "message": str(exc)})
-        _emit_done(cmd_name, request_id, ok=False, summary=str(exc))
+        bridge_core._emit({"type": "error", "message": str(exc)})
+        bridge_core._emit_done(cmd_name, request_id, ok=False, summary=str(exc))
     finally:
         # Child stderr uses PIPE + pump; nothing to close here.
         # Best-effort cleanup of bridge temp artifacts.
@@ -1197,7 +1269,7 @@ def _dispatch(msg: dict) -> bool:
     """Return False when the stdin loop should exit (shutdown)."""
     cmd = msg.get("cmd")
     rid = (msg.get("request_id") or "").strip()
-    _emit(
+    bridge_core._emit(
         {
             "type": "log",
             "level": "DEBUG",
@@ -1208,11 +1280,11 @@ def _dispatch(msg: dict) -> bool:
 
     if cmd == "health":
         _cmd_health()
-        _emit_done("health", rid)
+        bridge_core._emit_done("health", rid)
         return True
 
     if cmd == "shutdown":
-        _emit(
+        bridge_core._emit(
             {
                 "type": "log",
                 "level": "INFO",
@@ -1220,7 +1292,7 @@ def _dispatch(msg: dict) -> bool:
                 "logger": "unity_bridge",
             }
         )
-        _emit_done("shutdown", rid)
+        bridge_core._emit_done("shutdown", rid)
         return False
 
     if cmd == "diag.python":
@@ -1255,7 +1327,7 @@ def _dispatch(msg: dict) -> bool:
         clip_root = msg.get("clip_root") or ""
         frames_dir = msg.get("frames_dir") or ""
         overwrite = bool(msg.get("overwrite", False))
-        _emit(
+        bridge_core._emit(
             {
                 "type": "log",
                 "level": "INFO",
@@ -1268,7 +1340,7 @@ def _dispatch(msg: dict) -> bool:
             args=(rid, clip_root, frames_dir, overwrite),
             daemon=True,
         ).start()
-        _emit(
+        bridge_core._emit(
             {
                 "type": "log",
                 "level": "INFO",
@@ -1288,8 +1360,25 @@ def _dispatch(msg: dict) -> bool:
             daemon=True,
         ).start()
         return True
+    if cmd == "model.download_gvm":
+        threading.Thread(target=_run_model_download_gvm, args=(rid,), daemon=True).start()
+        return True
+    if cmd == "model.download_sam2":
+        model_name = msg.get("model_name") or "base-plus"
+        threading.Thread(target=_run_model_download_sam2, args=(rid, model_name), daemon=True).start()
+        return True
+    if cmd == "model.download_videomama":
+        threading.Thread(target=_run_model_download_videomama, args=(rid,), daemon=True).start()
+        return True
+    if cmd == "model.check_status":
+        threading.Thread(target=_run_model_check_status, args=(rid,), daemon=True).start()
+        return True
+    if cmd == "model.is_installed":
+        model_name = msg.get("model_name") or ""
+        threading.Thread(target=_run_model_is_installed, args=(rid, model_name), daemon=True).start()
+        return True
 
-    _emit(
+    bridge_core._emit(
         {
             "type": "log",
             "level": "WARNING",
@@ -1301,11 +1390,11 @@ def _dispatch(msg: dict) -> bool:
 
 
 def main() -> None:
-    _emit(
+    bridge_core._emit(
         {
             "type": "log",
             "level": "INFO",
-            "message": f"unity_bridge started (stdio NDJSON) [{BRIDGE_VERSION}] file={__file__}",
+            "message": f"unity_bridge started (stdio NDJSON) [{bridge_core.BRIDGE_VERSION}] file={__file__}",
             "logger": "unity_bridge",
         }
     )
@@ -1314,7 +1403,7 @@ def main() -> None:
         line = line.strip()
         if not line:
             continue
-        _emit(
+        bridge_core._emit(
             {
                 "type": "log",
                 "level": "DEBUG",
@@ -1325,7 +1414,7 @@ def main() -> None:
         try:
             msg = json.loads(line)
         except json.JSONDecodeError as exc:
-            _emit(
+            bridge_core._emit(
                 {
                     "type": "log",
                     "level": "WARNING",
