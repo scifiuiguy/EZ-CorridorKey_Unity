@@ -408,6 +408,7 @@ namespace CorridorKey.Editor
         /// <summary>
         /// Loads INPUT plate + OUTPUT for the scrubbed frame. OUTPUT currently uses <c>AlphaHint/{stem}.png</c>
         /// (assumes ALPHA / alpha-hint view). Later: resolve OUTPUT path from dual-viewer channel / session (comp, matte, etc.).
+        /// Keeps A/B wipe sources in sync with the same paths (CPU + GPU renderers reload from disk).
         /// </summary>
         void OnPlayheadFrameChanged(int stemIndex)
         {
@@ -423,6 +424,8 @@ namespace CorridorKey.Editor
             if (inTex == null)
             {
                 Debug.LogWarning($"[CorridorKey] Playhead: could not load plate {platePath}");
+                _sampleAbComparisonRenderer?.SetComparisonSourcesFromAbsoluteFiles(null, null);
+                _gpuAbComparisonRenderer?.SetComparisonSourcesFromAbsoluteFiles(null, null);
                 return;
             }
 
@@ -430,6 +433,7 @@ namespace CorridorKey.Editor
             ReplacePlayheadPaneTexture(_playheadInputImage!, inTex);
             ShowPlayheadPaneWithTexture("viewer-input", _playheadInputImage);
 
+            string? abOutputPath = null;
             EnsurePlayheadPaneImage("viewer-output", ref _playheadOutputImage);
             if (File.Exists(alphaPath))
             {
@@ -438,22 +442,33 @@ namespace CorridorKey.Editor
                 {
                     ReplacePlayheadPaneTexture(_playheadOutputImage!, outTex);
                     ShowPlayheadPaneWithTexture("viewer-output", _playheadOutputImage);
+                    abOutputPath = alphaPath;
                 }
+                else
+                    ClearPlayheadOutputPaneToPlaceholder();
             }
             else
-            {
-                if (_playheadOutputImage != null && _playheadOutputImage.image is Texture2D oldOut)
-                {
-                    DestroyImmediate(oldOut);
-                    _playheadOutputImage.image = null;
-                }
+                ClearPlayheadOutputPaneToPlaceholder();
 
-                var outPh = _viewerBody.Q<Label>("viewer-output-placeholder-label");
-                if (outPh != null)
-                    outPh.style.display = DisplayStyle.Flex;
-                if (_playheadOutputImage != null)
-                    _playheadOutputImage.style.display = DisplayStyle.None;
+            _sampleAbComparisonRenderer?.SetComparisonSourcesFromAbsoluteFiles(platePath, abOutputPath);
+            _gpuAbComparisonRenderer?.SetComparisonSourcesFromAbsoluteFiles(platePath, abOutputPath);
+        }
+
+        void ClearPlayheadOutputPaneToPlaceholder()
+        {
+            if (_viewerBody == null)
+                return;
+            if (_playheadOutputImage != null && _playheadOutputImage.image is Texture2D oldOut)
+            {
+                DestroyImmediate(oldOut);
+                _playheadOutputImage.image = null;
             }
+
+            var outPh = _viewerBody.Q<Label>("viewer-output-placeholder-label");
+            if (outPh != null)
+                outPh.style.display = DisplayStyle.Flex;
+            if (_playheadOutputImage != null)
+                _playheadOutputImage.style.display = DisplayStyle.None;
         }
 
         void ShowPlayheadPaneWithTexture(string paneName, Image img)
