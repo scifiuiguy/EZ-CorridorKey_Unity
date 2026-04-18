@@ -1,4 +1,6 @@
 #nullable enable
+using System.Collections.Generic;
+using System.IO;
 using CorridorKey.Backend.Payloads;
 using CorridorKey.Editor.Backend;
 using CorridorKey.Editor.Integration;
@@ -9,6 +11,7 @@ using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine;
 using UnityEngine.UIElements;
+using Image = UnityEngine.UIElements.Image;
 
 namespace CorridorKey.Editor
 {
@@ -44,6 +47,13 @@ namespace CorridorKey.Editor
         BiRefNetViewerIntegration? _biRefNetViewerIntegration;
 
         DualViewerChromeController? _dualViewerChrome;
+
+        ViewerPlayheadStripController? _playheadStrip;
+        VisualElement? _viewerBody;
+        List<string>? _plateFramePaths;
+        string? _playheadClipRoot;
+        Image? _playheadInputImage;
+        Image? _playheadOutputImage;
 
         /// <summary>Unity may persist <see cref="EditorWindow"/> fields across domain reloads; reset in <see cref="CreateGUI"/>.</summary>
         [System.NonSerialized]
@@ -93,6 +103,18 @@ namespace CorridorKey.Editor
 
             _biRefNetViewerIntegration?.Dispose();
             _biRefNetViewerIntegration = null;
+
+            if (_playheadStrip != null)
+            {
+                _playheadStrip.FrameChanged -= OnPlayheadFrameChanged;
+                _playheadStrip = null;
+            }
+
+            _playheadInputImage = null;
+            _playheadOutputImage = null;
+            _plateFramePaths = null;
+            _playheadClipRoot = null;
+            _viewerBody = null;
 
             if (_backend != null)
             {
@@ -152,6 +174,17 @@ namespace CorridorKey.Editor
             _gpuMeterHeader = null;
             _biRefNetViewerIntegration?.Dispose();
             _biRefNetViewerIntegration = null;
+            if (_playheadStrip != null)
+            {
+                _playheadStrip.FrameChanged -= OnPlayheadFrameChanged;
+                _playheadStrip = null;
+            }
+
+            _playheadInputImage = null;
+            _playheadOutputImage = null;
+            _plateFramePaths = null;
+            _playheadClipRoot = null;
+            _viewerBody = null;
             _inferenceSectionController = null;
             _outputPerformanceSectionController = null;
 
@@ -248,7 +281,12 @@ namespace CorridorKey.Editor
                 ApplyAbPreviewMode();
             };
             ApplyAbPreviewMode();
-            _ = new ViewerPlayheadStripController(body);
+
+            _viewerBody = body;
+            _playheadStrip = new ViewerPlayheadStripController(body);
+            _playheadStrip.FrameChanged += OnPlayheadFrameChanged;
+            WirePlayheadFromDefaultTestClip();
+
             _ = new ParametersRailController(body, _biRefNetViewerIntegration, _queuePresenter);
 
             body.Q<Button>("status-run-selected")?.RegisterCallback<ClickEvent>(_ =>
@@ -338,6 +376,130 @@ namespace CorridorKey.Editor
             _inferenceLoadTestSchedule?.Pause();
             _inferenceLoadTestSchedule = null;
             _inferenceLoadProgress = null;
+        }
+
+        void WirePlayheadFromDefaultTestClip()
+        {
+            if (_playheadStrip == null || _viewerBody == null)
+                return;
+
+            _plateFramePaths = null;
+            _playheadClipRoot = null;
+
+            if (!CorridorKeyDataPaths.TryGetDefaultTestClip(out var clipRoot, out var framesDir))
+            {
+                _playheadStrip.SetFrameCount(0);
+                return;
+            }
+
+            if (!ClipPlateFramePaths.TryCollectSortedPlateFrames(framesDir, out var paths))
+            {
+                _playheadStrip.SetFrameCount(0);
+                return;
+            }
+
+            _playheadClipRoot = clipRoot;
+            _plateFramePaths = paths;
+            _playheadStrip.SetFrameCount(paths.Count);
+            _dualViewerChrome?.SelectViewModeById("alpha");
+            _playheadStrip.SetStemIndex(0, notify: true);
+        }
+
+        /// <summary>
+        /// Loads INPUT plate + OUTPUT for the scrubbed frame. OUTPUT currently uses <c>AlphaHint/{stem}.png</c>
+        /// (assumes ALPHA / alpha-hint view). Later: resolve OUTPUT path from dual-viewer channel / session (comp, matte, etc.).
+        /// </summary>
+        void OnPlayheadFrameChanged(int stemIndex)
+        {
+            if (_viewerBody == null || _plateFramePaths == null || _playheadClipRoot == null)
+                return;
+            if (stemIndex < 0 || stemIndex >= _plateFramePaths.Count)
+                return;
+
+            var platePath = _plateFramePaths[stemIndex];
+            var alphaPath = ClipPlateFramePaths.GetAlphaHintPathForPlateFrame(_playheadClipRoot, platePath);
+
+            var inTex = TextureFileLoader.LoadReadableFromFile(platePath);
+            if (inTex == null)
+            {
+                Debug.LogWarning($"[CorridorKey] Playhead: could not load plate {platePath}");
+                return;
+            }
+
+            EnsurePlayheadPaneImage("viewer-input", ref _playheadInputImage);
+            ReplacePlayheadPaneTexture(_playheadInputImage!, inTex);
+            ShowPlayheadPaneWithTexture("viewer-input", _playheadInputImage);
+
+            EnsurePlayheadPaneImage("viewer-output", ref _playheadOutputImage);
+            if (File.Exists(alphaPath))
+            {
+                var outTex = TextureFileLoader.LoadReadableFromFile(alphaPath);
+                if (outTex != null)
+                {
+                    ReplacePlayheadPaneTexture(_playheadOutputImage!, outTex);
+                    ShowPlayheadPaneWithTexture("viewer-output", _playheadOutputImage);
+                }
+            }
+            else
+            {
+                if (_playheadOutputImage != null && _playheadOutputImage.image is Texture2D oldOut)
+                {
+                    DestroyImmediate(oldOut);
+                    _playheadOutputImage.image = null;
+                }
+
+                var outPh = _viewerBody.Q<Label>("viewer-output-placeholder-label");
+                if (outPh != null)
+                    outPh.style.display = DisplayStyle.Flex;
+                if (_playheadOutputImage != null)
+                    _playheadOutputImage.style.display = DisplayStyle.None;
+            }
+        }
+
+        void ShowPlayheadPaneWithTexture(string paneName, Image img)
+        {
+            if (_viewerBody == null)
+                return;
+            var ph = _viewerBody.Q<Label>($"{paneName}-placeholder-label");
+            if (ph != null)
+                ph.style.display = DisplayStyle.None;
+            img.style.display = DisplayStyle.Flex;
+            img.MarkDirtyRepaint();
+        }
+
+        void EnsurePlayheadPaneImage(string paneName, ref Image? slot)
+        {
+            if (slot != null || _viewerBody == null)
+                return;
+            var surface = _viewerBody.Q<VisualElement>($"{paneName}-surface");
+            if (surface == null)
+                return;
+
+            var existing = surface.Q<Image>($"{paneName}-preview-image");
+            if (existing != null)
+            {
+                slot = existing;
+                return;
+            }
+
+            slot = new Image
+            {
+                name = $"{paneName}-preview-image",
+                scaleMode = ScaleMode.ScaleToFit,
+                pickingMode = PickingMode.Ignore,
+            };
+            slot.style.flexGrow = 1;
+            slot.style.width = Length.Percent(100);
+            slot.style.height = Length.Percent(100);
+            slot.style.display = DisplayStyle.None;
+            surface.Add(slot);
+        }
+
+        static void ReplacePlayheadPaneTexture(Image img, Texture2D tex)
+        {
+            if (img.image is Texture2D oldTex && oldTex != tex)
+                DestroyImmediate(oldTex);
+            img.image = tex;
         }
 
         void OnRootImmersiveHotkey(KeyDownEvent evt)

@@ -9,6 +9,13 @@ namespace CorridorKey.Editor.UI
     /// EZ <c>ui/widgets/dual_viewer.py</c> shared bottom strip: <c>FrameScrubber</c> + zoom label.
     /// Stem index is 0-based; frame label shows 1-based current / total (matches EZ <c>_update_label</c>).
     /// </summary>
+    /// <remarks>
+    /// Scrubber UX (vs EZ click-only): pointer drag is supported. While the pointer is down on the slider,
+    /// the thumb snaps to integer frame indices and the frame label updates on every move, but
+    /// <see cref="FrameChanged"/> fires only on pointer release (or capture loss). Single clicks jump the
+    /// thumb and publish once on release. Keyboard and transport buttons publish on each discrete step.
+    /// Step / first / last transport buttons pause playback if it was running (play stays on toggle only).
+    /// </remarks>
     public sealed class ViewerPlayheadStripController
     {
         const float PlaybackIntervalMs = 333f;
@@ -28,6 +35,8 @@ namespace CorridorKey.Editor.UI
         int _totalFrames;
         bool _playing;
         bool _suppressSlider;
+        bool _scrubPointerActive;
+        int _lastPublishedStem = -1;
         IVisualElementScheduledItem? _playbackSchedule;
 
         public event Action<int>? FrameChanged;
@@ -52,7 +61,11 @@ namespace CorridorKey.Editor.UI
             _endBtn = root.Q<Button>("viewer-playhead-btn-end")
                         ?? throw new InvalidOperationException("Missing viewer-playhead-btn-end.");
 
-            _slider.RegisterValueChangedCallback(OnSliderChanged);
+            _slider.RegisterValueChangedCallback(OnSliderValueChanged);
+            _slider.RegisterCallback<PointerDownEvent>(OnSliderPointerDown, TrickleDown.TrickleDown);
+            _slider.RegisterCallback<PointerUpEvent>(OnSliderPointerUp, TrickleDown.TrickleDown);
+            _slider.RegisterCallback<PointerCaptureOutEvent>(OnSliderPointerCaptureOut);
+
             _startBtn.clicked += GoStart;
             _prevBtn.clicked += StepBack;
             _playBtn.clicked += TogglePlayback;
@@ -67,13 +80,14 @@ namespace CorridorKey.Editor.UI
         {
             _totalFrames = Mathf.Max(0, totalFrames);
             StopPlayback();
+            _lastPublishedStem = -1;
 
             if (_totalFrames <= 0)
             {
                 _suppressSlider = true;
                 _slider.lowValue = 0f;
                 _slider.highValue = 0f;
-                _slider.value = 0f;
+                _slider.SetValueWithoutNotify(0f);
                 _suppressSlider = false;
                 _slider.SetEnabled(false);
                 SetTransportEnabled(false);
@@ -83,7 +97,8 @@ namespace CorridorKey.Editor.UI
                 _suppressSlider = true;
                 _slider.lowValue = 0f;
                 _slider.highValue = _totalFrames - 1;
-                _slider.value = Mathf.Clamp(Mathf.RoundToInt(_slider.value), 0, _totalFrames - 1);
+                var clamped = Mathf.Clamp(Mathf.RoundToInt(_slider.value), 0, _totalFrames - 1);
+                _slider.SetValueWithoutNotify(clamped);
                 _suppressSlider = false;
                 _slider.SetEnabled(true);
                 SetTransportEnabled(true);
@@ -101,19 +116,77 @@ namespace CorridorKey.Editor.UI
                 return;
             var v = Mathf.Clamp(stemIndex, 0, _totalFrames - 1);
             _suppressSlider = true;
-            _slider.value = v;
+            _slider.SetValueWithoutNotify(v);
             _suppressSlider = false;
             RefreshLabels();
             if (notify)
-                FrameChanged?.Invoke(v);
+                PublishFrameChangedIfChanged();
         }
 
-        void OnSliderChanged(ChangeEvent<float> evt)
+        void OnSliderPointerDown(PointerDownEvent evt)
+        {
+            if (_totalFrames <= 0)
+                return;
+            _scrubPointerActive = true;
+            _slider.CapturePointer(evt.pointerId);
+        }
+
+        void OnSliderPointerUp(PointerUpEvent evt)
+        {
+            EndScrubPointerIfCapture(evt.pointerId);
+        }
+
+        void OnSliderPointerCaptureOut(PointerCaptureOutEvent evt)
+        {
+            EndScrubPointerIfCapture(evt.pointerId);
+        }
+
+        void EndScrubPointerIfCapture(int pointerId)
+        {
+            if (_slider.HasPointerCapture(pointerId))
+                _slider.ReleasePointer(pointerId);
+
+            if (!_scrubPointerActive)
+                return;
+            _scrubPointerActive = false;
+            PublishFrameChangedIfChanged();
+        }
+
+        void OnSliderValueChanged(ChangeEvent<float> evt)
         {
             if (_suppressSlider)
                 return;
+
+            ApplySnappedStemFromSlider();
             RefreshLabels();
-            FrameChanged?.Invoke(CurrentStemIndex);
+
+            if (_scrubPointerActive)
+                return;
+
+            PublishFrameChangedIfChanged();
+        }
+
+        /// <summary>Rounds the slider to the nearest stem index (discrete frames while dragging).</summary>
+        void ApplySnappedStemFromSlider()
+        {
+            if (_totalFrames <= 0)
+                return;
+            var snapped = Mathf.Clamp(Mathf.RoundToInt(_slider.value), 0, _totalFrames - 1);
+            if (Mathf.Abs(_slider.value - snapped) > 0.0001f)
+            {
+                _suppressSlider = true;
+                _slider.SetValueWithoutNotify(snapped);
+                _suppressSlider = false;
+            }
+        }
+
+        void PublishFrameChangedIfChanged()
+        {
+            var stem = CurrentStemIndex;
+            if (stem == _lastPublishedStem)
+                return;
+            _lastPublishedStem = stem;
+            FrameChanged?.Invoke(stem);
         }
 
         void RefreshLabels()
@@ -143,21 +216,25 @@ namespace CorridorKey.Editor.UI
 
         void GoStart()
         {
+            StopPlayback();
             SetStemIndex(0);
         }
 
         void StepBack()
         {
+            StopPlayback();
             SetStemIndex(CurrentStemIndex - 1);
         }
 
         void StepForward()
         {
+            StopPlayback();
             SetStemIndex(CurrentStemIndex + 1);
         }
 
         void GoEnd()
         {
+            StopPlayback();
             if (_totalFrames <= 0)
                 return;
             SetStemIndex(_totalFrames - 1);

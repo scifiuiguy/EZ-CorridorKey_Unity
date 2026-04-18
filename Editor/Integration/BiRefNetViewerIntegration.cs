@@ -229,6 +229,13 @@ namespace CorridorKey.Editor.Integration
             if (surface == null)
                 return;
 
+            var existing = surface.Q<Image>($"{paneName}-preview-image");
+            if (existing != null)
+            {
+                slot = existing;
+                return;
+            }
+
             slot = new Image
             {
                 name = $"{paneName}-preview-image",

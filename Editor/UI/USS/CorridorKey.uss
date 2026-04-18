@@ -162,10 +162,18 @@
     color: rgb(58, 58, 48);
 }
 
-/* Playhead slider — brand yellow dragger, dark groove (EZ feel) */
+/* Playhead slider — brand yellow dragger, dark groove (EZ feel).
+   Do not scale dragger-border (focus/shadow ring) — it warps the Editor shadow. Scale the inner
+   dragger only so layout math and the blue ring stay default; yellow bar is 3x taller visually. */
+.corridor-key-root .corridor-key-playhead-slider .unity-base-slider__dragger-border {
+    overflow: visible;
+}
+
 .corridor-key-root .corridor-key-playhead-slider .unity-base-slider__dragger {
     background-color: rgb(255, 242, 3);
     border-radius: 0;
+    transform-origin: center center;
+    scale: 1 3;
 }
 
 .corridor-key-root .corridor-key-playhead-slider .unity-base-slider__tracker {

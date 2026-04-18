@@ -161,7 +161,7 @@ namespace CorridorKey.Editor.UI
             {
                 QueueJobStatus.Queued => "Queued",
                 QueueJobStatus.Running => "Running",
-                QueueJobStatus.Succeeded => "Ready",
+                QueueJobStatus.Succeeded => "DONE",
                 QueueJobStatus.Failed => "Failed",
                 QueueJobStatus.Cancelled => "Cancelled",
                 _ => "",

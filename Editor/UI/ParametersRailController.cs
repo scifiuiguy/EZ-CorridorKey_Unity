@@ -248,16 +248,35 @@ namespace CorridorKey.Editor.UI
             Debug.Log("[CorridorKey] GVM AUTO clicked.");
         }
 
+        /// <summary>BiRefNet bridge <c>usage</c> from the model dropdown at activation time (selected index is authoritative).</summary>
+        string CurrentBiRefNetUsageForBridge()
+        {
+            var choices = _birefNetDropdown.choices;
+            if (choices != null && choices.Count > 0)
+            {
+                var i = _birefNetDropdown.index;
+                if (i >= 0 && i < choices.Count)
+                {
+                    var s = choices[i];
+                    if (!string.IsNullOrWhiteSpace(s))
+                        return s.Trim();
+                }
+            }
+
+            var v = _birefNetDropdown.value;
+            return string.IsNullOrWhiteSpace(v) ? BiRefNetModelOptions.DefaultDisplayName : v.Trim();
+        }
+
         /// <summary>Same work as clicking BIREFNET (bridge hook).</summary>
         void ActivateBiRefNetAlphaHint()
         {
             if (_biRefNetIntegration != null)
             {
-                _biRefNetIntegration.RequestBiRefNetForDefaultClip(_birefNetDropdown.value);
+                _biRefNetIntegration.RequestBiRefNetForDefaultClip(CurrentBiRefNetUsageForBridge());
                 return;
             }
 
-            Debug.Log($"[CorridorKey] BIREFNET clicked (no integration). Model: {_birefNetDropdown.value}");
+            Debug.Log($"[CorridorKey] BIREFNET clicked (no integration). Model: {CurrentBiRefNetUsageForBridge()}");
         }
 
         void OnGvmAutoClicked()
@@ -278,11 +297,11 @@ namespace CorridorKey.Editor.UI
         {
             if (_biRefNetIntegration != null)
             {
-                _biRefNetIntegration.RequestBiRefNetForDefaultClip(_birefNetDropdown.value, vm);
+                _biRefNetIntegration.RequestBiRefNetForDefaultClip(CurrentBiRefNetUsageForBridge(), vm);
                 return;
             }
 
-            Debug.Log($"[CorridorKey] BIREFNET clicked (no integration). Model: {_birefNetDropdown.value}");
+            Debug.Log($"[CorridorKey] BIREFNET clicked (no integration). Model: {CurrentBiRefNetUsageForBridge()}");
         }
 
         void OnBiRefNetDropdownChanged(ChangeEvent<string> evt)
