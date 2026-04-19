@@ -56,6 +56,7 @@ namespace CorridorKey.Editor
         Image? _playheadInputImage;
         Image? _playheadOutputImage;
         InputAnnotationRasterController? _inputAnnotations;
+        ParametersRailController? _parametersRail;
 
         /// <summary>Unity may persist <see cref="EditorWindow"/> fields across domain reloads; reset in <see cref="CreateGUI"/>.</summary>
         [System.NonSerialized]
@@ -72,6 +73,13 @@ namespace CorridorKey.Editor
         /// <summary>Debug: when true, advances the status bar by 10% every 0.5s. Private + NonSerialized so Unity does not persist it on the window (public fields on EditorWindow do).</summary>
         [System.NonSerialized]
         bool _testLoadAnimation;
+
+        /// <summary>When UITK and IMGUI both see the same KeyDown, avoid double-toggling brush / undo.</summary>
+        [System.NonSerialized]
+        int _annotationHotkeyConsumedFrame = -1;
+
+        [System.NonSerialized]
+        KeyCode _annotationHotkeyConsumedKey = KeyCode.None;
 
         ProgressBar? _inferenceLoadProgress;
         IVisualElementScheduledItem? _inferenceLoadTestSchedule;
@@ -107,8 +115,8 @@ namespace CorridorKey.Editor
             _biRefNetViewerIntegration = null;
             _gvmViewerIntegration?.Dispose();
             _gvmViewerIntegration = null;
-            _inputAnnotations?.Dispose();
-            _inputAnnotations = null;
+            TeardownInputAnnotations();
+            _parametersRail = null;
 
             if (_playheadStrip != null)
             {
@@ -182,8 +190,7 @@ namespace CorridorKey.Editor
             _biRefNetViewerIntegration = null;
             _gvmViewerIntegration?.Dispose();
             _gvmViewerIntegration = null;
-            _inputAnnotations?.Dispose();
-            _inputAnnotations = null;
+            TeardownInputAnnotations();
             if (_playheadStrip != null)
             {
                 _playheadStrip.FrameChanged -= OnPlayheadFrameChanged;
@@ -195,6 +202,7 @@ namespace CorridorKey.Editor
             _plateFramePaths = null;
             _playheadClipRoot = null;
             _viewerBody = null;
+            _parametersRail = null;
             _inferenceSectionController = null;
             _outputPerformanceSectionController = null;
 
@@ -308,9 +316,14 @@ namespace CorridorKey.Editor
                 () => _playheadStrip != null ? _playheadStrip.CurrentStemIndex : 0,
                 () => _playheadInputImage);
             _inputAnnotations.SetPlayheadStrip(_playheadStrip);
+            _parametersRail = new ParametersRailController(
+                body,
+                _biRefNetViewerIntegration,
+                _gvmViewerIntegration,
+                _queuePresenter,
+                () => _inputAnnotations?.HasAnyAnnotations() ?? false);
+            _inputAnnotations.AnnotationPersistenceChanged += OnAnnotationPersistenceChanged;
             WirePlayheadFromDefaultTestClip();
-
-            _ = new ParametersRailController(body, _biRefNetViewerIntegration, _gvmViewerIntegration, _queuePresenter);
 
             body.Q<Button>("status-run-selected")?.RegisterCallback<ClickEvent>(_ =>
                 Debug.Log("[CorridorKey] RUN SELECTED clicked."));
@@ -366,6 +379,7 @@ namespace CorridorKey.Editor
 
             // Immersive hotkey: handle via UITK at root + trickle-down. Keyboard focus after the first toggle often
             // lives on UITK elements, so IMGUI OnGUI may not receive KeyDown for the second press — restore looked broken.
+            root.RegisterCallback<KeyDownEvent>(OnRootAnnotationHotkeys, TrickleDown.TrickleDown);
             root.RegisterCallback<KeyDownEvent>(OnRootImmersiveHotkey, TrickleDown.TrickleDown);
         }
 
@@ -399,6 +413,20 @@ namespace CorridorKey.Editor
             _inferenceLoadTestSchedule?.Pause();
             _inferenceLoadTestSchedule = null;
             _inferenceLoadProgress = null;
+        }
+
+        void TeardownInputAnnotations()
+        {
+            if (_inputAnnotations == null)
+                return;
+            _inputAnnotations.AnnotationPersistenceChanged -= OnAnnotationPersistenceChanged;
+            _inputAnnotations.Dispose();
+            _inputAnnotations = null;
+        }
+
+        void OnAnnotationPersistenceChanged()
+        {
+            _parametersRail?.RefreshAnnotationGatedControls();
         }
 
         void WirePlayheadFromDefaultTestClip()
@@ -545,6 +573,20 @@ namespace CorridorKey.Editor
             img.image = tex;
         }
 
+        void OnRootAnnotationHotkeys(KeyDownEvent evt)
+        {
+            if (_inputAnnotations == null || rootVisualElement == null)
+                return;
+            if (evt.target is not VisualElement ve || ve.panel != rootVisualElement.panel)
+                return;
+            if (!_inputAnnotations.TryHandleKeyDownEvent(evt))
+                return;
+            _annotationHotkeyConsumedFrame = Time.frameCount;
+            _annotationHotkeyConsumedKey = evt.keyCode;
+            evt.StopPropagation();
+            evt.PreventDefault();
+        }
+
         void OnRootImmersiveHotkey(KeyDownEvent evt)
         {
             if (evt.keyCode != KeyCode.Space)
@@ -591,11 +633,22 @@ namespace CorridorKey.Editor
             if (root == null)
                 return;
 
-            if (e.type == EventType.KeyDown && EditorWindow.focusedWindow == this
-                && _inputAnnotations != null && _inputAnnotations.TryHandleImGuiKeyDown(e))
+            if (e.type == EventType.KeyDown && _inputAnnotations != null
+                && (EditorWindow.focusedWindow == this || EditorWindow.mouseOverWindow == this))
             {
-                e.Use();
-                return;
+                if (Time.frameCount == _annotationHotkeyConsumedFrame && e.keyCode == _annotationHotkeyConsumedKey)
+                {
+                    e.Use();
+                    return;
+                }
+
+                if (_inputAnnotations.TryHandleImGuiEditorKey(e))
+                {
+                    _annotationHotkeyConsumedFrame = Time.frameCount;
+                    _annotationHotkeyConsumedKey = e.keyCode;
+                    e.Use();
+                    return;
+                }
             }
 
             var t = e.type;
@@ -721,7 +774,9 @@ namespace CorridorKey.Editor
             editMenu.menu.AppendAction(
                 "Track Paint Masks",
                 _ => OnMenuTrackPaintMasks(),
-                _ => DropdownMenuAction.Status.Normal);
+                _ => _inputAnnotations != null && _inputAnnotations.HasAnyAnnotations()
+                    ? DropdownMenuAction.Status.Normal
+                    : DropdownMenuAction.Status.Disabled);
             editMenu.menu.AppendAction(
                 "Clear Paint Strokes",
                 _ => OnMenuClearPaintStrokes(),

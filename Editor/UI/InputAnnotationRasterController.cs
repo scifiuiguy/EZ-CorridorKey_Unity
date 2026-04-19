@@ -47,6 +47,9 @@ namespace CorridorKey.Editor.UI
         Dictionary<int, List<AnnotationStrokeData>> _byStem = new();
         string? _loadedClipRoot;
 
+        /// <summary>Fired after saved stroke data in <c>annotations.json</c> may have changed (load, save, undo, clear).</summary>
+        public event Action? AnnotationPersistenceChanged;
+
         string? _brushMode;
         float _brushRadius = DefaultBrushRadius;
         AnnotationStrokeData? _currentStroke;
@@ -99,6 +102,7 @@ namespace CorridorKey.Editor.UI
                 _byStem = AnnotationJsonIo.Load(clipRoot);
 
             RefreshOverlayRaster();
+            NotifyAnnotationPersistenceChanged();
         }
 
         public void Dispose()
@@ -271,6 +275,7 @@ namespace CorridorKey.Editor.UI
             if (!string.IsNullOrEmpty(clip))
                 AnnotationJsonIo.Save(clip, _byStem);
             RefreshOverlayRaster();
+            NotifyAnnotationPersistenceChanged();
         }
 
         /// <summary>EZ <c>AnnotationMixin._undo_annotation</c>: Ctrl+Z pops last stroke on current frame while brush is active.</summary>
@@ -303,47 +308,55 @@ namespace CorridorKey.Editor.UI
 
             AnnotationJsonIo.Save(clip, _byStem);
             RefreshOverlayRaster();
+            NotifyAnnotationPersistenceChanged();
             return true;
         }
 
+        void NotifyAnnotationPersistenceChanged()
+        {
+            AnnotationPersistenceChanged?.Invoke();
+        }
+
         /// <summary>
-        /// Call from <see cref="EditorWindow.OnGUI"/> <see cref="EventType.KeyDown"/> when this window is focused.
-        /// UITK <see cref="KeyDownEvent"/> on the root often misses 1/2 when focus is on sliders, buttons, or scrollers.
+        /// UITK <see cref="KeyDownEvent"/> on the window root with <see cref="TrickleDown"/> so 1/2/Ctrl+Z work
+        /// while focus is on the parameters rail, queue, etc. (IMGUI <see cref="EditorWindow.OnGUI"/> does not receive
+        /// those keys when a UITK control has keyboard focus).
         /// </summary>
-        public bool TryHandleImGuiKeyDown(Event e)
+        public bool TryHandleKeyDownEvent(KeyDownEvent evt)
+        {
+            var focusTarget = evt.target as Focusable;
+            var command = evt.commandKey || (evt.modifiers & EventModifiers.Command) != 0;
+            return TryHandleBindingKeys(evt.keyCode, evt.ctrlKey, command, focusTarget);
+        }
+
+        /// <summary>
+        /// IMGUI fallback when <see cref="EventType.KeyDown"/> is delivered to the window (mouse over or keyboard focus).
+        /// </summary>
+        public bool TryHandleImGuiEditorKey(Event e)
         {
             if (e.type != EventType.KeyDown)
                 return false;
             var focused = _root.panel?.focusController?.focusedElement;
-            if (TryApplyAnnotationCommands(e, focused))
-                return true;
-            if (TryApplyBrushHotkey(e.keyCode, focused))
-                return true;
-            return false;
+            return TryHandleBindingKeys(e.keyCode, e.control, e.command, focused);
         }
 
-        bool TryApplyAnnotationCommands(Event e, Focusable? targetForTextFieldCheck)
+        bool TryHandleBindingKeys(KeyCode keyCode, bool control, bool command, Focusable? focusTarget)
         {
-            if (IsUnderTextField(targetForTextFieldCheck))
+            if (IsUnderTextField(focusTarget))
                 return false;
-            if (!e.control && !e.command)
-                return false;
-            if (e.keyCode == KeyCode.Z)
-                return TryUndoLastStroke();
-            return false;
-        }
+            if (control || command)
+            {
+                if (keyCode == KeyCode.Z)
+                    return TryUndoLastStroke();
+            }
 
-        bool TryApplyBrushHotkey(KeyCode key, Focusable? targetForTextFieldCheck)
-        {
-            if (IsUnderTextField(targetForTextFieldCheck))
-                return false;
-            if (key == KeyCode.Alpha1 || key == KeyCode.Keypad1)
+            if (keyCode == KeyCode.Alpha1 || keyCode == KeyCode.Keypad1)
             {
                 ToggleBrush("fg");
                 return true;
             }
 
-            if (key == KeyCode.Alpha2 || key == KeyCode.Keypad2)
+            if (keyCode == KeyCode.Alpha2 || keyCode == KeyCode.Keypad2)
             {
                 ToggleBrush("bg");
                 return true;
@@ -663,6 +676,7 @@ namespace CorridorKey.Editor.UI
 
                 list.Add(_currentStroke);
                 AnnotationJsonIo.Save(clip, _byStem);
+                NotifyAnnotationPersistenceChanged();
             }
 
             _currentStroke = null;

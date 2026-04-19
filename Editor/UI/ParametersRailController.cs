@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using CorridorKey.Editor.Integration;
 using CorridorKey.Editor.UI.Presenters;
 using CorridorKey.Editor.ViewModels;
@@ -74,6 +75,7 @@ namespace CorridorKey.Editor.UI
         readonly BiRefNetViewerIntegration? _biRefNetIntegration;
         readonly GvmViewerIntegration? _gvmViewerIntegration;
         readonly QueuePresenter? _queuePresenter;
+        readonly Func<bool>? _hasSavedAnnotationStrokes;
 
         bool _advancedExpanded;
         bool _alphaExpanded;
@@ -91,11 +93,13 @@ namespace CorridorKey.Editor.UI
             VisualElement root,
             BiRefNetViewerIntegration? biRefNetIntegration = null,
             GvmViewerIntegration? gvmViewerIntegration = null,
-            QueuePresenter? queuePresenter = null)
+            QueuePresenter? queuePresenter = null,
+            Func<bool>? hasSavedAnnotationStrokes = null)
         {
             _biRefNetIntegration = biRefNetIntegration;
             _gvmViewerIntegration = gvmViewerIntegration;
             _queuePresenter = queuePresenter;
+            _hasSavedAnnotationStrokes = hasSavedAnnotationStrokes;
             _modeAutoBtn = root.Q<Button>("parameters-toggle-auto")
                            ?? throw new System.InvalidOperationException("parameters-toggle-auto");
             _modeGuidedBtn = root.Q<Button>("parameters-toggle-guided")
@@ -172,6 +176,18 @@ namespace CorridorKey.Editor.UI
 
             ApplyTopMode();
             ApplyDrawImport();
+            RefreshAnnotationGatedControls();
+        }
+
+        /// <summary>
+        /// Call when <c>annotations.json</c> stroke data may have changed. Track mask and matting toggles require paint strokes.
+        /// </summary>
+        public void RefreshAnnotationGatedControls()
+        {
+            var has = _hasSavedAnnotationStrokes?.Invoke() ?? false;
+            _trackMaskBtn.SetEnabled(has);
+            _mattingEngineMatBtn.SetEnabled(has);
+            _mattingEngineVmBtn.SetEnabled(has);
         }
 
         void OnModeAutoClicked()
