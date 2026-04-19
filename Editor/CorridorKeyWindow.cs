@@ -46,6 +46,7 @@ namespace CorridorKey.Editor
 
         BiRefNetViewerIntegration? _biRefNetViewerIntegration;
         GvmViewerIntegration? _gvmViewerIntegration;
+        TrackMaskIntegration? _trackMaskIntegration;
 
         DualViewerChromeController? _dualViewerChrome;
 
@@ -115,6 +116,8 @@ namespace CorridorKey.Editor
             _biRefNetViewerIntegration = null;
             _gvmViewerIntegration?.Dispose();
             _gvmViewerIntegration = null;
+            _trackMaskIntegration?.Dispose();
+            _trackMaskIntegration = null;
             TeardownInputAnnotations();
             _parametersRail = null;
 
@@ -190,6 +193,8 @@ namespace CorridorKey.Editor
             _biRefNetViewerIntegration = null;
             _gvmViewerIntegration?.Dispose();
             _gvmViewerIntegration = null;
+            _trackMaskIntegration?.Dispose();
+            _trackMaskIntegration = null;
             TeardownInputAnnotations();
             if (_playheadStrip != null)
             {
@@ -278,6 +283,7 @@ namespace CorridorKey.Editor
 
             if (_backend != null)
             {
+                _trackMaskIntegration?.Dispose();
                 _biRefNetViewerIntegration?.Dispose();
                 _biRefNetViewerIntegration = new BiRefNetViewerIntegration(
                     _backend,
@@ -292,6 +298,11 @@ namespace CorridorKey.Editor
                     _sampleAbComparisonRenderer,
                     _gpuAbComparisonRenderer,
                     _dualViewerChrome,
+                    onQueueJobFailed: (vm, detail) => _queuePresenter?.FailJob(vm, detail));
+                _trackMaskIntegration = new TrackMaskIntegration(
+                    _backend,
+                    body,
+                    onSam2TrackSucceeded: ScheduleRefreshPlayheadForCurrentFrame,
                     onQueueJobFailed: (vm, detail) => _queuePresenter?.FailJob(vm, detail));
             }
 
@@ -320,6 +331,7 @@ namespace CorridorKey.Editor
                 body,
                 _biRefNetViewerIntegration,
                 _gvmViewerIntegration,
+                _trackMaskIntegration,
                 _queuePresenter,
                 () => _inputAnnotations?.HasAnyAnnotations() ?? false);
             _inputAnnotations.AnnotationPersistenceChanged += OnAnnotationPersistenceChanged;
@@ -427,6 +439,18 @@ namespace CorridorKey.Editor
         void OnAnnotationPersistenceChanged()
         {
             _parametersRail?.RefreshAnnotationGatedControls();
+        }
+
+        void ScheduleRefreshPlayheadForCurrentFrame()
+        {
+            EditorApplication.delayCall += RefreshPlayheadForCurrentFrame;
+        }
+
+        void RefreshPlayheadForCurrentFrame()
+        {
+            if (_playheadStrip == null)
+                return;
+            OnPlayheadFrameChanged(_playheadStrip.CurrentStemIndex);
         }
 
         void WirePlayheadFromDefaultTestClip()

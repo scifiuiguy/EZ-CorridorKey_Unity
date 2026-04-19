@@ -154,6 +154,20 @@ def _dispatch(msg: dict) -> bool:
             daemon=True,
         ).start()
         return True
+    if cmd == "guided.sam2_track":
+        clip_root = msg.get("clip_root") or ""
+        frames_dir = msg.get("frames_dir") or ""
+        try:
+            from . import guided_sam2
+        except ImportError:
+            import guided_sam2
+
+        threading.Thread(
+            target=guided_sam2._run_guided_sam2_track,
+            args=(rid, clip_root, frames_dir),
+            daemon=True,
+        ).start()
+        return True
     if cmd == "model.download_gvm":
         threading.Thread(target=model_management._run_model_download_gvm, args=(rid,), daemon=True).start()
         return True

@@ -74,6 +74,7 @@ namespace CorridorKey.Editor.UI
 
         readonly BiRefNetViewerIntegration? _biRefNetIntegration;
         readonly GvmViewerIntegration? _gvmViewerIntegration;
+        readonly TrackMaskIntegration? _trackMaskIntegration;
         readonly QueuePresenter? _queuePresenter;
         readonly Func<bool>? _hasSavedAnnotationStrokes;
 
@@ -93,11 +94,13 @@ namespace CorridorKey.Editor.UI
             VisualElement root,
             BiRefNetViewerIntegration? biRefNetIntegration = null,
             GvmViewerIntegration? gvmViewerIntegration = null,
+            TrackMaskIntegration? trackMaskIntegration = null,
             QueuePresenter? queuePresenter = null,
             Func<bool>? hasSavedAnnotationStrokes = null)
         {
             _biRefNetIntegration = biRefNetIntegration;
             _gvmViewerIntegration = gvmViewerIntegration;
+            _trackMaskIntegration = trackMaskIntegration;
             _queuePresenter = queuePresenter;
             _hasSavedAnnotationStrokes = hasSavedAnnotationStrokes;
             _modeAutoBtn = root.Q<Button>("parameters-toggle-auto")
@@ -324,7 +327,7 @@ namespace CorridorKey.Editor.UI
 
         void OnTrackMaskClicked()
         {
-            Debug.Log("[CorridorKey] TRACK MASK clicked.");
+            _trackMaskIntegration?.RequestSam2TrackForDefaultClip();
         }
 
         void OnImportAlphaClicked()
