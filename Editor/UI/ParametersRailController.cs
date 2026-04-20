@@ -1,8 +1,12 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using CorridorKey.Editor.Integration;
 using CorridorKey.Editor.UI.Presenters;
 using CorridorKey.Editor.ViewModels;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -365,8 +369,87 @@ namespace CorridorKey.Editor.UI
 
         void OnImportAlphaClicked()
         {
-            Debug.Log("[CorridorKey] IMPORT ALPHA clicked.");
+            if (!CorridorKeyDataPaths.TryGetDefaultTestClip(out var clipRoot, out _))
+            {
+                Debug.LogError("[CorridorKey] Import Alpha: default test clip not found.");
+                return;
+            }
+
+            if (!CorridorKeyDataPaths.IsPathUnderProject(clipRoot))
+            {
+                Debug.LogError($"[CorridorKey] Import Alpha: refusing clip_root outside project: {clipRoot}");
+                return;
+            }
+
+            var alphaDir = Path.Combine(clipRoot, "AlphaHint");
+            try
+            {
+                Directory.CreateDirectory(alphaDir);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[CorridorKey] Import Alpha: could not create AlphaHint folder: {ex.Message}");
+                return;
+            }
+
+            var selectedFiles = PromptForAlphaFiles();
+            if (selectedFiles == null || selectedFiles.Count == 0)
+            {
+                Debug.Log("[CorridorKey] Import Alpha: cancelled.");
+                return;
+            }
+
+            var copied = 0;
+            foreach (var src in selectedFiles)
+            {
+                try
+                {
+                    var dst = Path.Combine(alphaDir, Path.GetFileName(src));
+                    File.Copy(src, dst, overwrite: true);
+                    copied++;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[CorridorKey] Import Alpha: failed to copy '{src}': {ex.Message}");
+                }
+            }
+
+            Debug.Log($"[CorridorKey] Import Alpha: copied {copied}/{selectedFiles.Count} file(s) into AlphaHint.");
         }
+
+        static List<string>? PromptForAlphaFiles()
+        {
+            return PickAlphaFilesFromFolderDialog();
+        }
+
+        static bool IsSupportedAlphaFile(string path)
+        {
+            var ext = Path.GetExtension(path);
+            return ext.Equals(".png", StringComparison.OrdinalIgnoreCase)
+                   || ext.Equals(".exr", StringComparison.OrdinalIgnoreCase);
+        }
+
+        static List<string>? PickAlphaFilesFromFolderDialog()
+        {
+            var folder = EditorUtility.OpenFolderPanel("Select folder containing alpha files", "", "");
+            if (string.IsNullOrWhiteSpace(folder))
+                return null;
+
+            try
+            {
+                return Directory
+                    .GetFiles(folder)
+                    .Where(IsSupportedAlphaFile)
+                    .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[CorridorKey] Import Alpha: failed reading folder '{folder}': {ex.Message}");
+                return null;
+            }
+        }
+
 
         void OnAdvancedClicked()
         {
