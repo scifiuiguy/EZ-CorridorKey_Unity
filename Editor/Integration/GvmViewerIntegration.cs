@@ -85,11 +85,10 @@ namespace CorridorKey.Editor.Integration
             _pendingDownloadRequestId = checkRequestId;
             _queuedJobAfterDownload = queueRow;
 
-            var checkPayload = new
+            var checkPayload = new ModelIsInstalledStdin
             {
-                cmd = "model.is_installed",
                 request_id = checkRequestId,
-                model_name = "gvm"
+                model_name = "gvm",
             };
 
             var err = _backend.TrySendJson(checkPayload);
@@ -181,12 +180,11 @@ namespace CorridorKey.Editor.Integration
                         var downloadRequestId = Guid.NewGuid().ToString("N");
                         _pendingDownloadRequestId = downloadRequestId;
                         
-                        var downloadPayload = new
+                        var downloadPayload = new ModelDownloadGvmStdin
                         {
-                            cmd = "model.download_gvm",
-                            request_id = downloadRequestId
+                            request_id = downloadRequestId,
                         };
-                        
+
                         var err = _backend.TrySendJson(downloadPayload);
                         if (err != null)
                         {
@@ -360,6 +358,279 @@ namespace CorridorKey.Editor.Integration
             slot.style.height = Length.Percent(100);
             slot.style.display = DisplayStyle.None;
             surface.Add(slot);
+        }
+    }
+
+    /// <summary>
+    /// Track Mask: <c>model.is_installed</c> (SAM2) → optional <c>model.prepare_sam2_track</c> (pip <c>[tracker]</c> + weights)
+    /// → <c>guided.sam2_track</c>, each with its own <c>request_id</c>, matching <see cref="GvmViewerIntegration"/>.
+    /// </summary>
+    public sealed class TrackMaskIntegration : IDisposable
+    {
+        readonly ProcessBackendClient _backend;
+        readonly VisualElement _body;
+        readonly Action? _onSam2TrackSucceeded;
+
+        string? _pendingRequestId;
+
+        string? _pendingCheckRequestId;
+        string? _pendingSetupRequestId;
+        QueueJobVm? _queuedSetupJob;
+        QueueJobVm? _queuedTrackJob;
+        readonly Action<QueueJobVm, string>? _onQueueJobFailed;
+        readonly Action<QueueJobVm>? _onQueueJobUpdated;
+
+        public TrackMaskIntegration(
+            ProcessBackendClient backend,
+            VisualElement body,
+            Action? onSam2TrackSucceeded = null,
+            Action<QueueJobVm, string>? onQueueJobFailed = null,
+            Action<QueueJobVm>? onQueueJobUpdated = null)
+        {
+            _backend = backend;
+            _body = body;
+            _onSam2TrackSucceeded = onSam2TrackSucceeded;
+            _onQueueJobFailed = onQueueJobFailed;
+            _onQueueJobUpdated = onQueueJobUpdated;
+            _backend.BridgeCommandDoneReceived += OnBridgeCommandDone;
+        }
+
+        public void Dispose()
+        {
+            _backend.BridgeCommandDoneReceived -= OnBridgeCommandDone;
+        }
+
+        /// <summary>Starts SAM2 mask track for the default <see cref="CorridorKeyDataPaths"/> clip.</summary>
+        public void RequestSam2TrackForDefaultClip(QueueJobVm? setupRow = null, QueueJobVm? trackRow = null)
+        {
+            if (!CorridorKeyDataPaths.TryGetDefaultTestClip(out var clipRoot, out var framesDir))
+            {
+                Debug.LogError(
+                    "[CorridorKey] SAM2 track: default test clip not found. Expected CorridorKeyData with Frames extracted.");
+                FailQueueRow(setupRow, "No default clip");
+                FailQueueRow(trackRow, "No default clip");
+                return;
+            }
+
+            if (!CorridorKeyDataPaths.IsPathUnderProject(clipRoot))
+            {
+                Debug.LogError($"[CorridorKey] SAM2 track: refusing clip_root outside project: {clipRoot}");
+                FailQueueRow(setupRow, "Invalid clip path");
+                FailQueueRow(trackRow, "Invalid clip path");
+                return;
+            }
+
+            _queuedSetupJob = setupRow;
+            _queuedTrackJob = trackRow;
+
+            if (setupRow != null)
+            {
+                setupRow.Status = QueueJobStatus.Running;
+                setupRow.CurrentFrame = 1;
+                setupRow.TotalFrames = 100;
+                setupRow.Detail = "Checking install state...";
+                _onQueueJobUpdated?.Invoke(setupRow);
+            }
+            if (trackRow != null)
+            {
+                trackRow.Status = QueueJobStatus.Queued;
+                trackRow.CurrentFrame = 0;
+                trackRow.TotalFrames = 0;
+                trackRow.Detail = "Waiting for SAM2 setup...";
+                _onQueueJobUpdated?.Invoke(trackRow);
+            }
+
+            CheckAndDownloadSam2Model(clipRoot, framesDir);
+        }
+
+        void CheckAndDownloadSam2Model(string clipRoot, string framesDir)
+        {
+            var checkRequestId = Guid.NewGuid().ToString("N");
+            _pendingCheckRequestId = checkRequestId;
+
+            var checkPayload = new ModelIsInstalledStdin
+            {
+                request_id = checkRequestId,
+                model_name = "sam2",
+            };
+
+            var err = _backend.TrySendJson(checkPayload);
+            if (err != null)
+            {
+                _pendingCheckRequestId = null;
+                FailQueueRow(_queuedSetupJob, $"Model check failed: {err}");
+                FailQueueRow(_queuedTrackJob, "SAM2 setup did not start");
+                Debug.LogError($"[CorridorKey] SAM2 model check send failed — {err}");
+                return;
+            }
+
+            var status = _body.Q<Label>("viewer-shared-status-label");
+            if (status != null)
+                status.text = "Checking SAM2 model…";
+
+            Debug.Log($"[CorridorKey] Checking SAM2 model installation (request_id={checkRequestId}).");
+        }
+
+        void StartSam2TrackAfterModelCheck(string clipRoot, string framesDir)
+        {
+            var requestId = _queuedTrackJob != null ? _queuedTrackJob.JobId : Guid.NewGuid().ToString("N");
+            if (_queuedTrackJob != null)
+            {
+                _queuedTrackJob.RequestId = requestId;
+                _queuedTrackJob.Status = QueueJobStatus.Running;
+                _queuedTrackJob.Detail = "SAM2 tracking...";
+                _onQueueJobUpdated?.Invoke(_queuedTrackJob);
+            }
+
+            _pendingRequestId = requestId;
+
+            var payload = new Sam2TrackStdin
+            {
+                request_id = requestId,
+                clip_root = clipRoot,
+                frames_dir = framesDir,
+            };
+
+            var sendErr = _backend.TrySendJson(payload);
+            if (sendErr != null)
+            {
+                _pendingRequestId = null;
+                FailQueueRow(_queuedTrackJob, sendErr);
+                Debug.LogError($"[CorridorKey] SAM2 track: bridge send failed — {sendErr}");
+                return;
+            }
+
+            var status = _body.Q<Label>("viewer-shared-status-label");
+            if (status != null)
+                status.text = "SAM2 track… (see Console)";
+
+            Debug.Log($"[CorridorKey] SAM2 track started (request_id={requestId}).");
+        }
+
+        void FailQueueRow(QueueJobVm? queueRow, string detail)
+        {
+            if (queueRow == null)
+                return;
+            _onQueueJobFailed?.Invoke(queueRow, detail);
+        }
+
+        void OnBridgeCommandDone(BridgeCommandDonePayload p)
+        {
+            if (!string.IsNullOrEmpty(_pendingCheckRequestId) && p.RequestId == _pendingCheckRequestId)
+            {
+                _pendingCheckRequestId = null;
+                var status = _body.Q<Label>("viewer-shared-status-label");
+
+                if (p.Cmd == "model.is_installed")
+                {
+                    if (p.Ok)
+                    {
+                        if (_queuedSetupJob != null)
+                        {
+                            _queuedSetupJob.Status = QueueJobStatus.Succeeded;
+                            _queuedSetupJob.CurrentFrame = 100;
+                            _queuedSetupJob.TotalFrames = 100;
+                            _queuedSetupJob.Detail = "SAM2 already installed";
+                            _onQueueJobUpdated?.Invoke(_queuedSetupJob);
+                        }
+                        Debug.Log("[CorridorKey] SAM2 model is installed, starting mask track.");
+                        if (CorridorKeyDataPaths.TryGetDefaultTestClip(out var defaultClipRoot, out var defaultFramesDir))
+                            StartSam2TrackAfterModelCheck(defaultClipRoot, defaultFramesDir);
+                        else
+                            FailQueueRow(_queuedTrackJob, "No default clip after model check");
+                    }
+                    else
+                    {
+                        Debug.Log("[CorridorKey] SAM2 not ready, starting prepare (tracker package + weights)…");
+                        if (status != null)
+                            status.text = "Preparing SAM2 (pip + weights; may take minutes)…";
+
+                        var prepareRequestId = _queuedSetupJob != null ? _queuedSetupJob.JobId : Guid.NewGuid().ToString("N");
+                        _pendingSetupRequestId = prepareRequestId;
+                        if (_queuedSetupJob != null)
+                        {
+                            _queuedSetupJob.RequestId = prepareRequestId;
+                            _queuedSetupJob.Status = QueueJobStatus.Running;
+                            _queuedSetupJob.CurrentFrame = 10;
+                            _queuedSetupJob.TotalFrames = 100;
+                            _queuedSetupJob.Detail = "Installing tracker dependency...";
+                            _onQueueJobUpdated?.Invoke(_queuedSetupJob);
+                        }
+
+                        var downloadPayload = new ModelPrepareSam2TrackStdin
+                        {
+                            request_id = prepareRequestId,
+                            model_name = "base-plus",
+                        };
+
+                        var err = _backend.TrySendJson(downloadPayload);
+                        if (err != null)
+                        {
+                            _pendingSetupRequestId = null;
+                            FailQueueRow(_queuedSetupJob, $"SAM2 prepare start failed: {err}");
+                            FailQueueRow(_queuedTrackJob, "SAM2 setup failed before track");
+                            Debug.LogError($"[CorridorKey] SAM2 prepare send failed — {err}");
+                        }
+                    }
+                    return;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(_pendingSetupRequestId) && p.RequestId == _pendingSetupRequestId)
+            {
+                if (p.Cmd == "model.prepare_sam2_track")
+                {
+                    _pendingSetupRequestId = null;
+                    if (p.Ok)
+                    {
+                        if (_queuedSetupJob != null)
+                        {
+                            _queuedSetupJob.Status = QueueJobStatus.Succeeded;
+                            _queuedSetupJob.CurrentFrame = 100;
+                            _queuedSetupJob.TotalFrames = 100;
+                            _queuedSetupJob.Detail = "SAM2 setup complete";
+                            _onQueueJobUpdated?.Invoke(_queuedSetupJob);
+                        }
+                        Debug.Log("[CorridorKey] SAM2 prepare completed, starting mask track.");
+                        if (CorridorKeyDataPaths.TryGetDefaultTestClip(out var downloadClipRoot, out var downloadFramesDir))
+                            StartSam2TrackAfterModelCheck(downloadClipRoot, downloadFramesDir);
+                        else
+                            FailQueueRow(_queuedTrackJob, "No default clip after SAM2 prepare");
+                    }
+                    else
+                    {
+                        FailQueueRow(_queuedSetupJob, $"SAM2 prepare failed: {p.Summary}");
+                        FailQueueRow(_queuedTrackJob, "SAM2 setup failed");
+                        Debug.LogError($"[CorridorKey] SAM2 prepare failed: {p.Summary}");
+                        var status = _body.Q<Label>("viewer-shared-status-label");
+                        if (status != null)
+                            status.text = "SAM2 prepare failed";
+                    }
+                    return;
+                }
+            }
+
+            if (string.IsNullOrEmpty(_pendingRequestId) || p.RequestId != _pendingRequestId)
+                return;
+            if (p.Cmd != "guided.sam2_track")
+                return;
+
+            _pendingRequestId = null;
+
+            var statusLabel = _body.Q<Label>("viewer-shared-status-label");
+            if (!p.Ok)
+            {
+                if (statusLabel != null)
+                    statusLabel.text = "SAM2 track failed";
+                Debug.LogError($"[CorridorKey] SAM2 track finished with error: {p.Summary}");
+                return;
+            }
+
+            if (statusLabel != null)
+                statusLabel.text = "Ready — SAM2 masks in VideoMamaMaskHint";
+
+            Debug.Log($"[CorridorKey] SAM2 track: {p.Summary}");
+            _onSam2TrackSucceeded?.Invoke();
         }
     }
 }

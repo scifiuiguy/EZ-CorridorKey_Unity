@@ -6,6 +6,8 @@ namespace CorridorKey.Editor.ViewModels
     {
         BiRefNetAlphaHint,
         GvmAlphaHint,
+        Sam2Setup,
+        Sam2Track,
     }
 
     public enum QueueJobStatus

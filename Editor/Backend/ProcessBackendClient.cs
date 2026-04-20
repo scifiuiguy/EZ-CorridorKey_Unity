@@ -66,7 +66,8 @@ namespace CorridorKey.Editor.Backend
 
         /// <summary>
         /// Sends one JSON object line to the bridge (stdin). Ensures the Python process is running.
-        /// Use for <c>diag.*</c> commands; payload must be JsonUtility-serializable.
+        /// Payload must be JsonUtility-serializable: use <c>[Serializable]</c> types with public fields;
+        /// anonymous types serialize as <c>{}</c> and must not be used here.
         /// </summary>
         public string? TrySendJson<T>(T stdinPayload) where T : class
         {
@@ -128,27 +129,23 @@ namespace CorridorKey.Editor.Backend
 
             StopProcessLocked();
 
-            var python = CorridorKeySettings.PythonExecutable;
-            var ezRoot = CorridorKeySettings.BackendWorkingDirectory;
-            if (string.IsNullOrEmpty(python))
-                return "EditorPrefs missing Python path (CorridorKey.PythonExecutable). Set in wizard or preferences.";
-            string pythonExe = python!;
+            if (!CorridorKeyBackendAutoLocator.TryResolveForBridge(out var pythonExe, out var ezRoot, out var resolveErr))
+                return resolveErr ?? "Could not resolve Python / CorridorKey runtime for the bridge.";
+
             var pythonErr = PythonExecutableValidator.Validate(pythonExe);
             if (pythonErr != null)
                 return pythonErr;
-            if (string.IsNullOrEmpty(ezRoot))
-                return "EditorPrefs missing EZ root (CorridorKey.BackendWorkingDirectory). Point at your EZ-CorridorKey checkout.";
 
-            // Bridge script always lives in this Unity package; EZ/R is only the process cwd (imports, modules/, checkpoints).
+            // Bridge script always lives in this Unity package; R is only the process cwd (imports, modules/, checkpoints).
             var bridge = CorridorKeyPackagePaths.GetUnityBridgeScriptPath();
             if (string.IsNullOrEmpty(bridge) || !File.Exists(bridge))
                 return "unity_bridge.py not found inside this package (Editor/Backend/Python/).";
 
-                var psi = new ProcessStartInfo
-                {
-                    FileName = pythonExe,
-                    // -u: unbuffered stdout/stderr so NDJSON lines flush immediately.
-                    Arguments = $"-u \"{bridge}\"",
+            var psi = new ProcessStartInfo
+            {
+                FileName = pythonExe,
+                // -u: unbuffered stdout/stderr so NDJSON lines flush immediately.
+                Arguments = $"-u \"{bridge}\"",
                 WorkingDirectory = ezRoot,
                 UseShellExecute = false,
                 RedirectStandardInput = true,
@@ -159,6 +156,9 @@ namespace CorridorKey.Editor.Backend
                 StandardOutputEncoding = new UTF8Encoding(false),
                 StandardErrorEncoding = new UTF8Encoding(false),
             };
+
+            // Helps Python bridge resolve setup_models / pip cwd when process WorkingDirectory is not enough.
+            psi.EnvironmentVariables["CORRIDORKEY_EZ_ROOT"] = ezRoot;
 
             var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
 

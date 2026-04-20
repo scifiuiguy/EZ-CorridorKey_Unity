@@ -303,7 +303,8 @@ namespace CorridorKey.Editor
                     _backend,
                     body,
                     onSam2TrackSucceeded: ScheduleRefreshPlayheadForCurrentFrame,
-                    onQueueJobFailed: (vm, detail) => _queuePresenter?.FailJob(vm, detail));
+                    onQueueJobFailed: (vm, detail) => _queuePresenter?.FailJob(vm, detail),
+                    onQueueJobUpdated: vm => _queuePresenter?.Refresh(vm));
             }
 
             _dualViewerChrome.AbToggled += on =>

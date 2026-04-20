@@ -327,7 +327,20 @@ namespace CorridorKey.Editor.UI
 
         void OnTrackMaskClicked()
         {
-            _trackMaskIntegration?.RequestSam2TrackForDefaultClip();
+            if (_trackMaskIntegration == null)
+                return;
+
+            QueueJobVm? setupVm = null;
+            QueueJobVm? trackVm = null;
+            if (_queuePresenter != null)
+            {
+                setupVm = Sam2QueueJobs.CreateSetupJobVm();
+                trackVm = Sam2QueueJobs.CreateTrackJobVm();
+                _queuePresenter.Enqueue(setupVm);
+                _queuePresenter.Enqueue(trackVm);
+            }
+
+            _trackMaskIntegration.RequestSam2TrackForDefaultClip(setupVm, trackVm);
         }
 
         void OnImportAlphaClicked()

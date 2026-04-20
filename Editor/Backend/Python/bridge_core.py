@@ -15,17 +15,27 @@ def _emit(obj: dict) -> None:
     print(json.dumps(obj, ensure_ascii=False, separators=(",", ":")), flush=True)
 
 
-def _emit_log_lines(text: str, logger: str = "unity_bridge", max_line_len: int = 3500) -> None:
+def _emit_log_lines(
+    text: str,
+    logger: str = "unity_bridge",
+    max_line_len: int = 3500,
+    *,
+    request_id: str | None = None,
+    level: str = "INFO",
+) -> None:
     """Emit multi-line text as separate log NDJSON lines (Unity JsonUtility is fragile on huge single fields)."""
+    base: dict = {"type": "log", "level": level, "logger": logger}
+    if request_id:
+        base["request_id"] = request_id
     if not text:
-        _emit({"type": "log", "level": "INFO", "logger": logger, "message": "(empty)"})
+        _emit({**base, "message": "(empty)"})
         return
     for raw_line in text.splitlines():
         remaining = raw_line
         while remaining:
             chunk = remaining[:max_line_len]
             remaining = remaining[max_line_len:]
-            _emit({"type": "log", "level": "INFO", "logger": logger, "message": chunk})
+            _emit({**base, "message": chunk})
 
 
 def _emit_done(cmd: str, request_id: str, ok: bool = True, summary: str | None = None) -> None:

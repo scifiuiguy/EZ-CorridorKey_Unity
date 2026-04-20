@@ -175,6 +175,10 @@ def _dispatch(msg: dict) -> bool:
         model_name = msg.get("model_name") or "base-plus"
         threading.Thread(target=model_management._run_model_download_sam2, args=(rid, model_name), daemon=True).start()
         return True
+    if cmd == "model.prepare_sam2_track":
+        model_name = msg.get("model_name") or "base-plus"
+        threading.Thread(target=model_management._run_model_prepare_sam2_track, args=(rid, model_name), daemon=True).start()
+        return True
     if cmd == "model.download_videomama":
         threading.Thread(target=model_management._run_model_download_videomama, args=(rid,), daemon=True).start()
         return True

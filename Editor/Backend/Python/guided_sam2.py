@@ -171,7 +171,7 @@ def _run_guided_sam2_track(request_id: str, clip_root: str, frames_dir: str) -> 
             return
 
         device = _detect_device()
-        _emit_status(f"device={device}; loading SAM2…")
+        _emit_status(f"device={device}; loading SAM2...")
 
         tracker = SAM2Tracker(
             device=device,
@@ -202,7 +202,7 @@ def _run_guided_sam2_track(request_id: str, clip_root: str, frames_dir: str) -> 
 
         tracker.prepare(on_progress=on_progress, on_status=_emit_status)
 
-        _emit_status("Running SAM2 tracker…")
+        _emit_status("Running SAM2 tracker...")
         try:
             masks = tracker.track_video(
                 [frame for _, frame in named_frames],
@@ -212,8 +212,13 @@ def _run_guided_sam2_track(request_id: str, clip_root: str, frames_dir: str) -> 
                 check_cancel=None,
             )
         except SAM2NotInstalledError as exc:
-            bridge_core._emit({"type": "error", "message": str(exc)})
-            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=str(exc))
+            detail = (
+                f"{exc} If weights already downloaded, install the optional `sam2` package in the "
+                "same Python venv the Unity bridge uses (EZ-CorridorKey: `pip install -e \".[tracker]\"`). "
+                f"Import cause: {exc.__cause__!r}"
+            )
+            bridge_core._emit({"type": "error", "message": detail})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=detail)
             return
         except ValueError as exc:
             bridge_core._emit({"type": "error", "message": str(exc)})
@@ -253,7 +258,7 @@ def _run_guided_sam2_track(request_id: str, clip_root: str, frames_dir: str) -> 
         if os.path.isdir(alpha_dir):
             shutil.rmtree(alpha_dir, ignore_errors=True)
 
-        summary = f"SAM2 track complete: {len(stems)} masks → VideoMamaMaskHint"
+        summary = f"SAM2 track complete: {len(stems)} masks -> VideoMamaMaskHint"
         _emit_status(summary)
         bridge_core._emit_done(cmd_name, request_id, ok=True, summary=summary)
     except Exception as exc:
