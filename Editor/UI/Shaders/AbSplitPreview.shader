@@ -29,6 +29,7 @@ Shader "Hidden/CorridorKey/AbSplitPreview"
             float4 _SplitNormal;
             // xy = RenderTexture width/height; split math must run in this space so angles match the UI line on non-square viewports.
             float4 _SplitViewportPx;
+            float _InputIsLinear;
 
             fixed4 frag(v2f_img i) : SV_Target
             {
@@ -38,6 +39,8 @@ Shader "Hidden/CorridorKey/AbSplitPreview"
                 float2 centerPx = _SplitCenter.xy * _SplitViewportPx.xy;
                 float signedDistance = dot(pixelPos - centerPx, normalize(_SplitNormal.xy));
                 fixed4 colorA = tex2D(_MainTex, uv);
+                if (_InputIsLinear > 0.5)
+                    colorA.rgb = LinearToGammaSpace(colorA.rgb);
                 fixed4 colorB = tex2D(_TexB, uv);
                 return signedDistance <= 0.0 ? colorA : colorB;
             }

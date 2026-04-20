@@ -29,6 +29,7 @@ namespace CorridorKey.Editor.UI
         bool _enabled;
         bool _disposed;
         bool _deferredPreviewRebuildPending;
+        bool _inputIsLinear;
         Vector2 _midpointNormalized = new Vector2(0.5f, 0.5f);
         float _angleDeg = 90f;
 
@@ -202,6 +203,15 @@ namespace CorridorKey.Editor.UI
                 ScheduleDeferredPreviewRebuild();
         }
 
+        public void SetInputIsLinear(bool inputIsLinear)
+        {
+            if (_inputIsLinear == inputIsLinear)
+                return;
+            _inputIsLinear = inputIsLinear;
+            if (_enabled)
+                RebuildPreview();
+        }
+
         void OnSurfaceGeometryChanged(GeometryChangedEvent evt)
         {
             if (!_enabled || _disposed)
@@ -277,6 +287,7 @@ namespace CorridorKey.Editor.UI
             _material.SetVector("_SplitCenter", new Vector4(_midpointNormalized.x, _midpointNormalized.y, 0f, 0f));
             _material.SetVector("_SplitNormal", new Vector4(normal.x, normal.y, 0f, 0f));
             _material.SetVector("_SplitViewportPx", new Vector4(width, height, 0f, 0f));
+            _material.SetFloat("_InputIsLinear", _inputIsLinear ? 1f : 0f);
 
             // Bind A explicitly: some Editor frames / layout passes leave _MainTex stale; Blit also sets it from source.
             _material.SetTexture("_MainTex", _sourceA);

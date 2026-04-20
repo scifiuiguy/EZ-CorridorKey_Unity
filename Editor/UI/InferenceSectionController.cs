@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -11,14 +12,19 @@ namespace CorridorKey.Editor.UI
     {
         readonly Label _despillLabel;
         readonly Label _refinerLabel;
+        readonly DropdownField _colorDropdown;
+
+        public event Action<bool>? InputColorSpaceChanged;
+
+        public bool InputIsLinear { get; private set; }
 
         public InferenceSectionController(VisualElement parametersRail)
         {
             var root = parametersRail.Q<VisualElement>("parameters-inference-section")
                        ?? throw new System.ArgumentException("Missing parameters-inference-section.", nameof(parametersRail));
 
-            var colorDropdown = root.Q<DropdownField>("parameters-inference-color-space")
-                                ?? throw new System.ArgumentException("Missing parameters-inference-color-space.", nameof(parametersRail));
+            _colorDropdown = root.Q<DropdownField>("parameters-inference-color-space")
+                             ?? throw new System.ArgumentException("Missing parameters-inference-color-space.", nameof(parametersRail));
 
             var despillSlider = root.Q<Slider>("parameters-inference-despill-slider")
                                 ?? throw new System.ArgumentException("Missing parameters-inference-despill-slider.", nameof(parametersRail));
@@ -38,18 +44,25 @@ namespace CorridorKey.Editor.UI
             var livePreview = root.Q<Toggle>("parameters-inference-live-preview")
                               ?? throw new System.ArgumentException("Missing parameters-inference-live-preview.", nameof(parametersRail));
 
-            colorDropdown.RegisterValueChangedCallback(OnDropdownChanged);
+            _colorDropdown.RegisterValueChangedCallback(OnDropdownChanged);
             despillSlider.RegisterValueChangedCallback(OnDespillChanged);
             despeckleToggle.RegisterValueChangedCallback(OnDespeckleToggled);
             despecklePx.RegisterValueChangedCallback(OnDespecklePxChanged);
             refinerSlider.RegisterValueChangedCallback(OnRefinerChanged);
             livePreview.RegisterValueChangedCallback(OnLivePreviewToggled);
+
+            InputIsLinear = IsLinearSelection(_colorDropdown.value);
         }
 
         void OnDropdownChanged(ChangeEvent<string> evt)
         {
             Debug.Log($"[CorridorKey] Inference color space: {evt.previousValue} → {evt.newValue}");
+            InputIsLinear = IsLinearSelection(evt.newValue);
+            InputColorSpaceChanged?.Invoke(InputIsLinear);
         }
+
+        static bool IsLinearSelection(string? value) =>
+            string.Equals((value ?? string.Empty).Trim(), "Linear", StringComparison.OrdinalIgnoreCase);
 
         void OnDespillChanged(ChangeEvent<float> evt)
         {

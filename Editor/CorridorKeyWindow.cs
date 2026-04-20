@@ -68,6 +68,9 @@ namespace CorridorKey.Editor
         [System.NonSerialized]
         bool _abGpuPreviewEnabled = true;
 
+        [System.NonSerialized]
+        bool _inputIsLinear;
+
         bool _immersiveViewersActive;
         bool _savedQueueExpanded;
         bool _savedParamsExpanded;
@@ -156,6 +159,8 @@ namespace CorridorKey.Editor
                 _queuePresenter = null;
             }
             _parametersSidebar = null;
+            if (_inferenceSectionController != null)
+                _inferenceSectionController.InputColorSpaceChanged -= OnInputColorSpaceChanged;
             _inferenceSectionController = null;
             _outputPerformanceSectionController = null;
             _viewerIoSplit?.Dispose();
@@ -218,6 +223,8 @@ namespace CorridorKey.Editor
             _playheadClipRoot = null;
             _viewerBody = null;
             _parametersRail = null;
+            if (_inferenceSectionController != null)
+                _inferenceSectionController.InputColorSpaceChanged -= OnInputColorSpaceChanged;
             _inferenceSectionController = null;
             _outputPerformanceSectionController = null;
 
@@ -269,6 +276,8 @@ namespace CorridorKey.Editor
             if (parametersRail != null)
             {
                 _inferenceSectionController = new InferenceSectionController(parametersRail);
+                _inputIsLinear = _inferenceSectionController.InputIsLinear;
+                _inferenceSectionController.InputColorSpaceChanged += OnInputColorSpaceChanged;
                 _outputPerformanceSectionController = new OutputPerformanceSectionController(parametersRail);
             }
 
@@ -280,6 +289,8 @@ namespace CorridorKey.Editor
             _abScrubberOverlay = new AbScrubberOverlayController(body);
             _sampleAbComparisonRenderer = new SampleAbComparisonRenderer(body);
             _gpuAbComparisonRenderer = new GpuAbComparisonRenderer(body);
+            _sampleAbComparisonRenderer.SetInputIsLinear(_inputIsLinear);
+            _gpuAbComparisonRenderer.SetInputIsLinear(_inputIsLinear);
             if (_abScrubberOverlay != null && _sampleAbComparisonRenderer != null)
             {
                 _abScrubberOverlay.SplitChanged += _sampleAbComparisonRenderer.SetSplit;
@@ -536,6 +547,8 @@ namespace CorridorKey.Editor
                 return;
             }
 
+            ApplyInputColorSpaceForDisplay(inTex);
+
             EnsurePlayheadPaneImage("viewer-input", ref _playheadInputImage);
             ReplacePlayheadPaneTexture(_playheadInputImage!, inTex);
             ShowPlayheadPaneWithTexture("viewer-input", _playheadInputImage);
@@ -561,6 +574,33 @@ namespace CorridorKey.Editor
             _gpuAbComparisonRenderer?.SetComparisonSourcesFromAbsoluteFiles(platePath, abOutputPath);
 
             _inputAnnotations?.NotifyInputPlateUpdated();
+        }
+
+        void OnInputColorSpaceChanged(bool inputIsLinear)
+        {
+            _inputIsLinear = inputIsLinear;
+            _sampleAbComparisonRenderer?.SetInputIsLinear(inputIsLinear);
+            _gpuAbComparisonRenderer?.SetInputIsLinear(inputIsLinear);
+            RefreshPlayheadForCurrentFrame();
+        }
+
+        void ApplyInputColorSpaceForDisplay(Texture2D texture)
+        {
+            if (!_inputIsLinear)
+                return;
+
+            var pixels = texture.GetPixels32();
+            for (var i = 0; i < pixels.Length; i++)
+            {
+                var p = pixels[i];
+                p.r = (byte)Mathf.Clamp(Mathf.RoundToInt(Mathf.LinearToGammaSpace(p.r / 255f) * 255f), 0, 255);
+                p.g = (byte)Mathf.Clamp(Mathf.RoundToInt(Mathf.LinearToGammaSpace(p.g / 255f) * 255f), 0, 255);
+                p.b = (byte)Mathf.Clamp(Mathf.RoundToInt(Mathf.LinearToGammaSpace(p.b / 255f) * 255f), 0, 255);
+                pixels[i] = p;
+            }
+
+            texture.SetPixels32(pixels);
+            texture.Apply(updateMipmaps: false, makeNoLongerReadable: false);
         }
 
         void ClearPlayheadOutputPaneToPlaceholder()

@@ -71,6 +71,7 @@ namespace CorridorKey.Editor.UI
         readonly VisualElement _alphaSectionBody;
         readonly Button _inferenceSectionToggle;
         readonly VisualElement _inferenceSectionBody;
+        readonly DropdownField _inferenceColorSpaceDropdown;
         readonly Button _outputSectionToggle;
         readonly VisualElement _outputSectionBody;
         readonly Button _performanceSectionToggle;
@@ -159,6 +160,8 @@ namespace CorridorKey.Editor.UI
                                       ?? throw new System.InvalidOperationException("parameters-inference-section-toggle");
             _inferenceSectionBody = root.Q<VisualElement>("parameters-inference-body")
                                     ?? throw new System.InvalidOperationException("parameters-inference-body");
+            _inferenceColorSpaceDropdown = root.Q<DropdownField>("parameters-inference-color-space")
+                                           ?? throw new System.InvalidOperationException("parameters-inference-color-space");
             _outputSectionToggle = root.Q<Button>("parameters-output-section-toggle")
                                    ?? throw new System.InvalidOperationException("parameters-output-section-toggle");
             _outputSectionBody = root.Q<VisualElement>("parameters-output-body")
@@ -364,7 +367,13 @@ namespace CorridorKey.Editor.UI
                 _queuePresenter.Enqueue(trackVm);
             }
 
-            _trackMaskIntegration.RequestSam2TrackForDefaultClip(setupVm, trackVm);
+            _trackMaskIntegration.RequestSam2TrackForDefaultClip(setupVm, trackVm, IsInputColorSpaceLinear());
+        }
+
+        bool IsInputColorSpaceLinear()
+        {
+            var v = (_inferenceColorSpaceDropdown.value ?? string.Empty).Trim();
+            return string.Equals(v, "Linear", StringComparison.OrdinalIgnoreCase);
         }
 
         void OnImportAlphaClicked()

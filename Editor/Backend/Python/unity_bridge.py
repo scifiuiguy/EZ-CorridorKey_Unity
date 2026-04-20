@@ -177,6 +177,7 @@ def _dispatch(msg: dict) -> bool:
     if cmd == "guided.sam2_track":
         clip_root = msg.get("clip_root") or ""
         frames_dir = msg.get("frames_dir") or ""
+        input_is_linear = bool(msg.get("input_is_linear", False))
         try:
             from . import guided_sam2
         except ImportError:
@@ -184,7 +185,7 @@ def _dispatch(msg: dict) -> bool:
 
         threading.Thread(
             target=guided_sam2._run_guided_sam2_track,
-            args=(rid, clip_root, frames_dir),
+            args=(rid, clip_root, frames_dir, input_is_linear),
             daemon=True,
         ).start()
         return True

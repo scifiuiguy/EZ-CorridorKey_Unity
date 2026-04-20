@@ -377,6 +377,7 @@ namespace CorridorKey.Editor.Integration
         string? _pendingSetupRequestId;
         QueueJobVm? _queuedSetupJob;
         QueueJobVm? _queuedTrackJob;
+        bool _sam2InputIsLinear;
         readonly Action<QueueJobVm, string>? _onQueueJobFailed;
         readonly Action<QueueJobVm>? _onQueueJobUpdated;
 
@@ -401,7 +402,7 @@ namespace CorridorKey.Editor.Integration
         }
 
         /// <summary>Starts SAM2 mask track for the default <see cref="CorridorKeyDataPaths"/> clip.</summary>
-        public void RequestSam2TrackForDefaultClip(QueueJobVm? setupRow = null, QueueJobVm? trackRow = null)
+        public void RequestSam2TrackForDefaultClip(QueueJobVm? setupRow = null, QueueJobVm? trackRow = null, bool inputIsLinear = false)
         {
             if (!CorridorKeyDataPaths.TryGetDefaultTestClip(out var clipRoot, out var framesDir))
             {
@@ -422,6 +423,7 @@ namespace CorridorKey.Editor.Integration
 
             _queuedSetupJob = setupRow;
             _queuedTrackJob = trackRow;
+            _sam2InputIsLinear = inputIsLinear;
 
             if (setupRow != null)
             {
@@ -440,10 +442,10 @@ namespace CorridorKey.Editor.Integration
                 _onQueueJobUpdated?.Invoke(trackRow);
             }
 
-            CheckAndDownloadSam2Model(clipRoot, framesDir);
+            CheckAndDownloadSam2Model(clipRoot, framesDir, inputIsLinear);
         }
 
-        void CheckAndDownloadSam2Model(string clipRoot, string framesDir)
+        void CheckAndDownloadSam2Model(string clipRoot, string framesDir, bool inputIsLinear)
         {
             var checkRequestId = Guid.NewGuid().ToString("N");
             _pendingCheckRequestId = checkRequestId;
@@ -471,7 +473,7 @@ namespace CorridorKey.Editor.Integration
             Debug.Log($"[CorridorKey] Checking SAM2 model installation (request_id={checkRequestId}).");
         }
 
-        void StartSam2TrackAfterModelCheck(string clipRoot, string framesDir)
+        void StartSam2TrackAfterModelCheck(string clipRoot, string framesDir, bool inputIsLinear)
         {
             var requestId = _queuedTrackJob != null ? _queuedTrackJob.JobId : Guid.NewGuid().ToString("N");
             if (_queuedTrackJob != null)
@@ -489,6 +491,7 @@ namespace CorridorKey.Editor.Integration
                 request_id = requestId,
                 clip_root = clipRoot,
                 frames_dir = framesDir,
+                input_is_linear = inputIsLinear,
             };
 
             var sendErr = _backend.TrySendJson(payload);
@@ -535,7 +538,7 @@ namespace CorridorKey.Editor.Integration
                         }
                         Debug.Log("[CorridorKey] SAM2 model is installed, starting mask track.");
                         if (CorridorKeyDataPaths.TryGetDefaultTestClip(out var defaultClipRoot, out var defaultFramesDir))
-                            StartSam2TrackAfterModelCheck(defaultClipRoot, defaultFramesDir);
+                            StartSam2TrackAfterModelCheck(defaultClipRoot, defaultFramesDir, _sam2InputIsLinear);
                         else
                             FailQueueRow(_queuedTrackJob, "No default clip after model check");
                     }
@@ -593,7 +596,7 @@ namespace CorridorKey.Editor.Integration
                         }
                         Debug.Log("[CorridorKey] SAM2 prepare completed, starting mask track.");
                         if (CorridorKeyDataPaths.TryGetDefaultTestClip(out var downloadClipRoot, out var downloadFramesDir))
-                            StartSam2TrackAfterModelCheck(downloadClipRoot, downloadFramesDir);
+                            StartSam2TrackAfterModelCheck(downloadClipRoot, downloadFramesDir, _sam2InputIsLinear);
                         else
                             FailQueueRow(_queuedTrackJob, "No default clip after SAM2 prepare");
                     }

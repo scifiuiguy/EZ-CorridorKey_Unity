@@ -11,5 +11,6 @@ namespace CorridorKey.Editor.Backend
         public string request_id = "";
         public string clip_root = "";
         public string frames_dir = "";
+        public bool input_is_linear = false;
     }
 }

@@ -26,6 +26,12 @@ _image_exts = {
 }
 
 
+def _linear_to_srgb(linear: np.ndarray) -> np.ndarray:
+    linear = np.clip(linear.astype(np.float32), 0.0, None)
+    mask = linear <= 0.0031308
+    return np.where(mask, linear * 12.92, 1.055 * np.power(linear, 1.0 / 2.4) - 0.055)
+
+
 def _emit_status(msg: str) -> None:
     bridge_core._emit(
         {
@@ -48,7 +54,7 @@ def _sorted_frame_basenames(frames_dir: str) -> list[str]:
     return names
 
 
-def _load_frame_rgb(path: str) -> np.ndarray | None:
+def _load_frame_rgb(path: str, *, input_is_linear: bool = False) -> np.ndarray | None:
     """Load plate frame as uint8 RGB (H, W, 3) for SAM2 / PIL."""
     img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
     if img is None:
@@ -73,6 +79,8 @@ def _load_frame_rgb(path: str) -> np.ndarray | None:
         return None
     if np.issubdtype(rgb.dtype, np.floating):
         rgb = np.clip(rgb, 0.0, None)
+        if input_is_linear and path.lower().endswith(".exr"):
+            rgb = _linear_to_srgb(rgb)
         mx = float(rgb.max()) if rgb.size else 0.0
         if mx > 1.0 + 1e-6:
             rgb = rgb / (mx + 1e-8)
@@ -95,7 +103,7 @@ def _detect_device() -> str:
     return "cpu"
 
 
-def _run_guided_sam2_track(request_id: str, clip_root: str, frames_dir: str) -> None:
+def _run_guided_sam2_track(request_id: str, clip_root: str, frames_dir: str, input_is_linear: bool = False) -> None:
     cmd_name = "guided.sam2_track"
     try:
         clip_root = os.path.abspath((clip_root or "").strip())
@@ -127,7 +135,7 @@ def _run_guided_sam2_track(request_id: str, clip_root: str, frames_dir: str) -> 
         frame_paths = [os.path.join(frames_dir, n) for n in basenames]
         named_frames: list[tuple[str, np.ndarray]] = []
         for fname, fpath in zip(basenames, frame_paths):
-            rgb = _load_frame_rgb(fpath)
+            rgb = _load_frame_rgb(fpath, input_is_linear=input_is_linear)
             if rgb is None:
                 msg = f"Unreadable frame: {fpath}"
                 bridge_core._emit({"type": "error", "message": msg})

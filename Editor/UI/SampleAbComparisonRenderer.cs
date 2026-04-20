@@ -25,6 +25,7 @@ namespace CorridorKey.Editor.UI
         Texture2D? _sourceB;
         Texture2D? _composited;
         bool _enabled;
+        bool _inputIsLinear;
         Vector2 _midpointNormalized = new Vector2(0.5f, 0.5f);
         float _angleDeg = 90f;
 
@@ -121,6 +122,15 @@ namespace CorridorKey.Editor.UI
                 RebuildComposite();
         }
 
+        public void SetInputIsLinear(bool inputIsLinear)
+        {
+            if (_inputIsLinear == inputIsLinear)
+                return;
+            _inputIsLinear = inputIsLinear;
+            if (_enabled)
+                RebuildComposite();
+        }
+
         void OnSurfaceGeometryChanged(GeometryChangedEvent evt)
         {
             if (_enabled)
@@ -166,6 +176,12 @@ namespace CorridorKey.Editor.UI
                     var p = new Vector2(x + 0.5f, uiY + 0.5f);
                     var signedDistance = Vector2.Dot(p - centerPx, normal);
                     var colorA = _sourceA.GetPixelBilinear(u, v);
+                    if (_inputIsLinear)
+                    {
+                        colorA.r = Mathf.LinearToGammaSpace(colorA.r);
+                        colorA.g = Mathf.LinearToGammaSpace(colorA.g);
+                        colorA.b = Mathf.LinearToGammaSpace(colorA.b);
+                    }
                     var colorB = _sourceB.GetPixelBilinear(u, v);
                     var blend = Mathf.Clamp01((signedDistance + SplitAntialiasWidthPx) / (SplitAntialiasWidthPx * 2f));
                     var color = Color.Lerp(colorA, colorB, blend);
