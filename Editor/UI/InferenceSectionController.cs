@@ -6,13 +6,19 @@ using UnityEngine.UIElements;
 namespace CorridorKey.Editor.UI
 {
     /// <summary>
-    /// Wires INFERENCE rail controls (EZ <c>parameter_panel.py</c> INFERENCE group). Placeholder handlers log to the Console for verification.
+    /// Wires INFERENCE rail controls (EZ <c>parameter_panel.py</c> INFERENCE group).
+    /// Mirrors EZ <c>params_changed</c>: any control change invokes <see cref="NotifyInferenceParamsChanged"/>.
     /// </summary>
     public sealed class InferenceSectionController
     {
         readonly Label _despillLabel;
         readonly Label _refinerLabel;
         readonly DropdownField _colorDropdown;
+        readonly Slider _despillSlider;
+        readonly Toggle _despeckleToggle;
+        readonly IntegerField _despecklePx;
+        readonly Slider _refinerSlider;
+        readonly Toggle _livePreview;
 
         public event Action<bool>? InputColorSpaceChanged;
 
@@ -26,39 +32,56 @@ namespace CorridorKey.Editor.UI
             _colorDropdown = root.Q<DropdownField>("parameters-inference-color-space")
                              ?? throw new System.ArgumentException("Missing parameters-inference-color-space.", nameof(parametersRail));
 
-            var despillSlider = root.Q<Slider>("parameters-inference-despill-slider")
-                                ?? throw new System.ArgumentException("Missing parameters-inference-despill-slider.", nameof(parametersRail));
+            _despillSlider = root.Q<Slider>("parameters-inference-despill-slider")
+                             ?? throw new System.ArgumentException("Missing parameters-inference-despill-slider.", nameof(parametersRail));
             _despillLabel = root.Q<Label>("parameters-inference-despill-label")
-                          ?? throw new System.ArgumentException("Missing parameters-inference-despill-label.", nameof(parametersRail));
+                            ?? throw new System.ArgumentException("Missing parameters-inference-despill-label.", nameof(parametersRail));
 
-            var despeckleToggle = root.Q<Toggle>("parameters-inference-despeckle-toggle")
-                                  ?? throw new System.ArgumentException("Missing parameters-inference-despeckle-toggle.", nameof(parametersRail));
-            var despecklePx = root.Q<IntegerField>("parameters-inference-despeckle-px")
-                              ?? throw new System.ArgumentException("Missing parameters-inference-despeckle-px.", nameof(parametersRail));
+            _despeckleToggle = root.Q<Toggle>("parameters-inference-despeckle-toggle")
+                               ?? throw new System.ArgumentException("Missing parameters-inference-despeckle-toggle.", nameof(parametersRail));
+            _despecklePx = root.Q<IntegerField>("parameters-inference-despeckle-px")
+                           ?? throw new System.ArgumentException("Missing parameters-inference-despeckle-px.", nameof(parametersRail));
 
-            var refinerSlider = root.Q<Slider>("parameters-inference-refiner-slider")
-                                ?? throw new System.ArgumentException("Missing parameters-inference-refiner-slider.", nameof(parametersRail));
+            _refinerSlider = root.Q<Slider>("parameters-inference-refiner-slider")
+                             ?? throw new System.ArgumentException("Missing parameters-inference-refiner-slider.", nameof(parametersRail));
             _refinerLabel = root.Q<Label>("parameters-inference-refiner-label")
-                          ?? throw new System.ArgumentException("Missing parameters-inference-refiner-label.", nameof(parametersRail));
+                            ?? throw new System.ArgumentException("Missing parameters-inference-refiner-label.", nameof(parametersRail));
 
-            var livePreview = root.Q<Toggle>("parameters-inference-live-preview")
-                              ?? throw new System.ArgumentException("Missing parameters-inference-live-preview.", nameof(parametersRail));
+            _livePreview = root.Q<Toggle>("parameters-inference-live-preview")
+                           ?? throw new System.ArgumentException("Missing parameters-inference-live-preview.", nameof(parametersRail));
 
             _colorDropdown.RegisterValueChangedCallback(OnDropdownChanged);
-            despillSlider.RegisterValueChangedCallback(OnDespillChanged);
-            despeckleToggle.RegisterValueChangedCallback(OnDespeckleToggled);
-            despecklePx.RegisterValueChangedCallback(OnDespecklePxChanged);
-            refinerSlider.RegisterValueChangedCallback(OnRefinerChanged);
-            livePreview.RegisterValueChangedCallback(OnLivePreviewToggled);
+            _despillSlider.RegisterValueChangedCallback(OnDespillChanged);
+            _despeckleToggle.RegisterValueChangedCallback(OnDespeckleToggled);
+            _despecklePx.RegisterValueChangedCallback(OnDespecklePxChanged);
+            _refinerSlider.RegisterValueChangedCallback(OnRefinerChanged);
+            _livePreview.RegisterValueChangedCallback(OnLivePreviewToggled);
 
             InputIsLinear = IsLinearSelection(_colorDropdown.value);
+            SyncDespillLabel();
+            SyncRefinerLabel();
+        }
+
+        /// <summary>EZ <c>ParameterPanel.params_changed</c> equivalent — call after any inference control updates.</summary>
+        void NotifyInferenceParamsChanged()
+        {
+            // var despillStrength = _despillSlider.value / 10f;
+            // var refinerScale = _refinerSlider.value / 10f;
+            // Debug.Log(
+            //     "[CorridorKey] Inference params_changed (EZ parity): " +
+            //     $"input_is_linear={InputIsLinear}, " +
+            //     $"despill_strength={despillStrength:0.###}, " +
+            //     $"auto_despeckle={_despeckleToggle.value}, " +
+            //     $"despeckle_size_px={_despecklePx.value}, " +
+            //     $"refiner_scale={refinerScale:0.###}, " +
+            //     $"live_preview={_livePreview.value}");
         }
 
         void OnDropdownChanged(ChangeEvent<string> evt)
         {
-            Debug.Log($"[CorridorKey] Inference color space: {evt.previousValue} → {evt.newValue}");
             InputIsLinear = IsLinearSelection(evt.newValue);
             InputColorSpaceChanged?.Invoke(InputIsLinear);
+            NotifyInferenceParamsChanged();
         }
 
         static bool IsLinearSelection(string? value) =>
@@ -66,31 +89,41 @@ namespace CorridorKey.Editor.UI
 
         void OnDespillChanged(ChangeEvent<float> evt)
         {
-            var v = evt.newValue;
-            _despillLabel.text = $"Despill: {v / 10f:0.0}";
-            Debug.Log($"[CorridorKey] Inference despill slider: {evt.previousValue:0.###} → {v:0.###} (strength {v / 10f:0.00})");
+            SyncDespillLabel();
+            NotifyInferenceParamsChanged();
         }
 
         void OnDespeckleToggled(ChangeEvent<bool> evt)
         {
-            Debug.Log($"[CorridorKey] Inference despeckle enabled: {evt.previousValue} → {evt.newValue}");
+            NotifyInferenceParamsChanged();
         }
 
         void OnDespecklePxChanged(ChangeEvent<int> evt)
         {
-            Debug.Log($"[CorridorKey] Inference despeckle size (px): {evt.previousValue} → {evt.newValue}");
+            NotifyInferenceParamsChanged();
         }
 
         void OnRefinerChanged(ChangeEvent<float> evt)
         {
-            var v = evt.newValue;
-            _refinerLabel.text = $"Refiner: {v / 10f:0.0}";
-            Debug.Log($"[CorridorKey] Inference refiner slider: {evt.previousValue:0.###} → {v:0.###} (scale {v / 10f:0.00})");
+            SyncRefinerLabel();
+            NotifyInferenceParamsChanged();
         }
 
         void OnLivePreviewToggled(ChangeEvent<bool> evt)
         {
-            Debug.Log($"[CorridorKey] Inference live preview: {evt.previousValue} → {evt.newValue}");
+            NotifyInferenceParamsChanged();
+        }
+
+        void SyncDespillLabel()
+        {
+            var v = _despillSlider.value;
+            _despillLabel.text = $"Despill: {v / 10f:0.0}";
+        }
+
+        void SyncRefinerLabel()
+        {
+            var v = _refinerSlider.value;
+            _refinerLabel.text = $"Refiner: {v / 10f:0.0}";
         }
     }
 }
