@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 
 try:
     from . import bridge_core
@@ -721,6 +722,303 @@ def _run_alpha_birefnet_hint(
     finally:
         # Child stderr uses PIPE + pump; nothing to close here.
         # Best-effort cleanup of bridge temp artifacts.
+        try:
+            if 'result_path' in locals() and os.path.isfile(result_path):
+                os.remove(result_path)
+        except Exception:
+            pass
+        try:
+            if 'status_path' in locals() and os.path.isfile(status_path):
+                os.remove(status_path)
+        except Exception:
+            pass
+        try:
+            if 'bridge_tmp_dir' in locals() and os.path.isdir(bridge_tmp_dir) and not os.listdir(bridge_tmp_dir):
+                os.rmdir(bridge_tmp_dir)
+        except Exception:
+            pass
+
+
+def _run_alpha_matanyone2_hint(
+    request_id: str,
+    clip_root: str,
+    frames_dir: str,
+    overwrite: bool,
+) -> None:
+    cmd_name = "alpha.matanyone2_hint"
+    try:
+        clip_root = os.path.abspath((clip_root or "").strip())
+        frames_dir = os.path.abspath((frames_dir or "").strip())
+        if not clip_root or not frames_dir:
+            msg = "clip_root and frames_dir are required"
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
+            return
+        if not os.path.isdir(clip_root):
+            msg = f"clip_root not found: {clip_root}"
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
+            return
+        if not os.path.isdir(frames_dir):
+            msg = f"frames_dir not found: {frames_dir}"
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
+            return
+
+        image_exts = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
+        frame_files = sorted([n for n in os.listdir(frames_dir) if n.lower().endswith(image_exts)], key=str.lower)
+        if not frame_files:
+            msg = f"frames_dir has no supported image frames: {frames_dir}"
+            bridge_core._emit({"type": "error", "message": msg})
+            bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
+            return
+
+        alpha_dir = os.path.join(clip_root, "AlphaHint")
+        if os.path.isdir(alpha_dir):
+            existing_alpha = [n for n in os.listdir(alpha_dir) if n.lower().endswith(".png")]
+            if existing_alpha and not overwrite:
+                msg = f"AlphaHint already has {len(existing_alpha)} PNGs; set overwrite=true to replace"
+                bridge_core._emit({"type": "error", "message": msg})
+                bridge_core._emit_done(cmd_name, request_id, ok=False, summary=msg)
+                return
+            if existing_alpha and overwrite:
+                shutil.rmtree(alpha_dir, ignore_errors=True)
+        os.makedirs(alpha_dir, exist_ok=True)
+
+        bridge_core._emit(
+            {
+                "type": "log",
+                "level": "INFO",
+                "logger": "unity_bridge",
+                "message": (
+                    f"run_matanyone2 request_id={request_id}: clip_root={clip_root}; "
+                    f"image_files_in_frames_dir={len(frame_files)}; overwrite={overwrite}"
+                ),
+            }
+        )
+
+        total_hint = max(1, len(frame_files))
+        bridge_tmp_dir = os.path.join(clip_root, ".bridge_tmp")
+        os.makedirs(bridge_tmp_dir, exist_ok=True)
+        result_path = os.path.join(bridge_tmp_dir, f"corridorkey_matanyone_result_{request_id}.json")
+        status_path = os.path.join(bridge_tmp_dir, f"corridorkey_matanyone_status_{request_id}.json")
+        stderr_path = os.path.join(bridge_tmp_dir, f"corridorkey_matanyone_stderr_{request_id}.log")
+        session_log_path = os.path.join(bridge_tmp_dir, f"corridorkey_matanyone_session_{request_id}.log")
+        try:
+            with open(stderr_path, "w", encoding="utf-8", buffering=1) as _sf:
+                _sf.write(f"unity_bridge: matanyone stderr (request_id={request_id})\n")
+        except Exception:
+            stderr_path = ""
+        try:
+            with open(session_log_path, "w", encoding="utf-8", buffering=1) as _lf:
+                _lf.write(f"[START] cmd={cmd_name} request_id={request_id}\n")
+                _lf.write(f"[ARGS] clip_root={clip_root}\n")
+                _lf.write(f"[ARGS] frames_dir={frames_dir}\n")
+                _lf.write(f"[ARGS] overwrite={overwrite}\n")
+        except Exception:
+            pass
+        runner_path = os.path.join(os.path.dirname(__file__), "matanyone_hint_runner.py")
+        try:
+            if os.path.exists(result_path):
+                os.remove(result_path)
+            if os.path.exists(status_path):
+                os.remove(status_path)
+        except Exception:
+            pass
+        if not os.path.isfile(runner_path):
+            raise RuntimeError(f"runner script not found: {runner_path}")
+
+        use_stderr_pipe = bool(stderr_path)
+        popen_kw: dict = {
+            "stdout": subprocess.DEVNULL,
+            "stdin": subprocess.DEVNULL,
+            "stderr": subprocess.PIPE if use_stderr_pipe else subprocess.DEVNULL,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "bufsize": 1,
+            "cwd": os.getcwd(),
+        }
+        if sys.platform == "win32":
+            popen_kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-u",
+                runner_path,
+                clip_root,
+                frames_dir,
+                alpha_dir,
+                result_path,
+                status_path,
+                session_log_path,
+            ],
+            **popen_kw,
+        )
+
+        if stderr_path:
+            try:
+                with open(stderr_path, "a", encoding="utf-8", buffering=1) as _sf:
+                    _sf.write(f"unity_bridge: child pid={proc.pid} {sys.executable!r}\n")
+            except Exception:
+                pass
+
+        if use_stderr_pipe and proc.stderr is not None:
+
+            def _pump_matanyone_stderr() -> None:
+                try:
+                    with open(stderr_path, "a", encoding="utf-8", buffering=1) as out:
+                        for line in proc.stderr:
+                            out.write(line)
+                            out.flush()
+                except Exception as exc:
+                    try:
+                        with open(stderr_path, "a", encoding="utf-8", errors="replace") as out:
+                            out.write(f"\nunity_bridge: stderr pump exception: {exc!r}\n")
+                            out.flush()
+                    except Exception:
+                        pass
+                finally:
+                    try:
+                        proc.stderr.close()
+                    except Exception:
+                        pass
+
+            threading.Thread(target=_pump_matanyone_stderr, daemon=True, name="matanyone-stderr-pump").start()
+
+        waited = 0.0
+        poll_s = 1.0
+        timeout_s = 900.0
+        heartbeat_log_s = 20.0
+        since_status_log = 0.0
+        last_count = -1
+        last_status_emit = ""
+        last_progress_emit = (-1, -1, "", "")
+        while True:
+            curr = len([n for n in os.listdir(alpha_dir) if n.lower().endswith(".png")]) if os.path.isdir(alpha_dir) else 0
+            if curr != last_count:
+                last_count = curr
+                bridge_core._emit(
+                    {
+                        "type": "progress",
+                        "request_id": request_id,
+                        "current": curr,
+                        "total": total_hint,
+                        "phase": "matanyone2_hint",
+                        "detail": f"{curr}/{total_hint} alpha PNG(s) on disk",
+                    }
+                )
+
+            if os.path.isfile(status_path):
+                try:
+                    with open(status_path, "r", encoding="utf-8") as sf:
+                        st = json.load(sf)
+                    if isinstance(st, dict):
+                        stage = str(st.get("stage") or "")
+                        detail = str(st.get("detail") or "")
+                        key = f"{stage}|{detail}"
+                        if key != last_status_emit:
+                            last_status_emit = key
+                            bridge_core._emit(
+                                {
+                                    "type": "log",
+                                    "level": "INFO",
+                                    "logger": "unity_bridge",
+                                    "message": f"MatAnyone2 [{stage}]: {detail}" if detail else f"MatAnyone2 [{stage}]",
+                                }
+                            )
+                        sc = st.get("current")
+                        stt = st.get("total")
+                        if isinstance(sc, int) and isinstance(stt, int) and stt > 0:
+                            inf_detail = detail or f"frame {sc}/{stt}"
+                            if (sc, stt, stage, inf_detail) != last_progress_emit:
+                                last_progress_emit = (sc, stt, stage, inf_detail)
+                                bridge_core._emit(
+                                    {
+                                        "type": "progress",
+                                        "request_id": request_id,
+                                        "current": sc,
+                                        "total": stt,
+                                        "phase": f"matanyone2_{stage}",
+                                        "detail": inf_detail,
+                                    }
+                                )
+                        elif stage:
+                            bridge_core._emit(
+                                {
+                                    "type": "progress",
+                                    "request_id": request_id,
+                                    "current": curr,
+                                    "total": total_hint,
+                                    "phase": f"matanyone2_{stage}",
+                                    "detail": detail or stage,
+                                }
+                            )
+                except Exception:
+                    pass
+
+            if os.path.isfile(result_path):
+                with open(result_path, "r", encoding="utf-8") as rf:
+                    result = json.load(rf)
+                if not result.get("ok", False):
+                    raise RuntimeError(str(result.get("message") or "matanyone runner failed"))
+                alpha_count = int(result.get("alpha_count", curr))
+                bridge_core._emit(
+                    {
+                        "type": "diag_result",
+                        "request_id": request_id,
+                        "diag": "matanyone2_hint",
+                        "ok": True,
+                        "summary": str(result.get("message") or f"MatAnyone2 wrote {alpha_count} alpha hint frame(s)"),
+                    }
+                )
+                break
+
+            if proc.poll() is not None:
+                code = proc.returncode or 0
+                if code != 0:
+                    if os.path.isfile(result_path):
+                        with open(result_path, "r", encoding="utf-8") as rf:
+                            result = json.load(rf)
+                        raise RuntimeError(str(result.get("message") or f"matanyone runner exited with code {code}"))
+                    raise RuntimeError(f"matanyone runner exited with code {code} without result file")
+                spin = 0
+                while spin < 10 and not os.path.isfile(result_path):
+                    threading.Event().wait(0.2)
+                    spin += 1
+                if os.path.isfile(result_path):
+                    break
+                raise RuntimeError("matanyone runner exited successfully but result file not found")
+
+            threading.Event().wait(poll_s)
+            waited += poll_s
+            since_status_log += poll_s
+            if since_status_log >= heartbeat_log_s:
+                since_status_log = 0.0
+                bridge_core._emit(
+                    {
+                        "type": "log",
+                        "level": "INFO",
+                        "logger": "unity_bridge",
+                        "message": (
+                            f"matanyone still running {int(waited)}s; see {session_log_path}"
+                            if session_log_path
+                            else f"matanyone still running {int(waited)}s"
+                        ),
+                    }
+                )
+            if waited >= timeout_s:
+                proc.kill()
+                raise RuntimeError(f"run_matanyone timed out after {int(timeout_s)}s")
+
+        alpha_count = len([n for n in os.listdir(alpha_dir) if n.lower().endswith(".png")])
+        media_processing._update_clip_json_with_alpha(clip_root, alpha_dir, alpha_count, status="matanyone2_hint_generated")
+        bridge_core._emit_done(cmd_name, request_id, ok=True, summary=f"alpha_hint_frames={alpha_count}")
+    except Exception as exc:  # noqa: BLE001
+        bridge_core._emit({"type": "error", "message": str(exc)})
+        bridge_core._emit_done(cmd_name, request_id, ok=False, summary=str(exc))
+    finally:
         try:
             if 'result_path' in locals() and os.path.isfile(result_path):
                 os.remove(result_path)

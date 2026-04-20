@@ -6,6 +6,7 @@ namespace CorridorKey.Editor.ViewModels
     {
         BiRefNetAlphaHint,
         GvmAlphaHint,
+        MatAnyoneAlphaHint,
         Sam2Setup,
         Sam2Track,
     }

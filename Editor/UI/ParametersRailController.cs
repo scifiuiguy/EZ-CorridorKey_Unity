@@ -75,6 +75,7 @@ namespace CorridorKey.Editor.UI
         readonly BiRefNetViewerIntegration? _biRefNetIntegration;
         readonly GvmViewerIntegration? _gvmViewerIntegration;
         readonly TrackMaskIntegration? _trackMaskIntegration;
+        readonly MatAnyoneViewerIntegration? _matAnyoneIntegration;
         readonly QueuePresenter? _queuePresenter;
         readonly Func<bool>? _hasSavedAnnotationStrokes;
 
@@ -95,12 +96,14 @@ namespace CorridorKey.Editor.UI
             BiRefNetViewerIntegration? biRefNetIntegration = null,
             GvmViewerIntegration? gvmViewerIntegration = null,
             TrackMaskIntegration? trackMaskIntegration = null,
+            MatAnyoneViewerIntegration? matAnyoneIntegration = null,
             QueuePresenter? queuePresenter = null,
             Func<bool>? hasSavedAnnotationStrokes = null)
         {
             _biRefNetIntegration = biRefNetIntegration;
             _gvmViewerIntegration = gvmViewerIntegration;
             _trackMaskIntegration = trackMaskIntegration;
+            _matAnyoneIntegration = matAnyoneIntegration;
             _queuePresenter = queuePresenter;
             _hasSavedAnnotationStrokes = hasSavedAnnotationStrokes;
             _modeAutoBtn = root.Q<Button>("parameters-toggle-auto")
@@ -220,7 +223,14 @@ namespace CorridorKey.Editor.UI
         void OnMattingMatAnyoneClicked()
         {
             CorridorKeyWindowLayout.SetEzChromeToggleExclusive(_mattingEngineMatBtn, _mattingEngineVmBtn);
-            Debug.Log("[CorridorKey] MATANYONE2 selected.");
+            var vm = MatAnyoneAlphaHintQueueJob.CreateJobVm();
+            _queuePresenter?.Enqueue(vm);
+            if (_matAnyoneIntegration != null)
+            {
+                _matAnyoneIntegration.RequestMatAnyoneForDefaultClip(vm);
+                return;
+            }
+            Debug.Log("[CorridorKey] MATANYONE2 selected (no integration).");
         }
 
         void OnMattingVideoMaMaClicked()

@@ -47,6 +47,7 @@ namespace CorridorKey.Editor
         BiRefNetViewerIntegration? _biRefNetViewerIntegration;
         GvmViewerIntegration? _gvmViewerIntegration;
         TrackMaskIntegration? _trackMaskIntegration;
+        MatAnyoneViewerIntegration? _matAnyoneViewerIntegration;
 
         DualViewerChromeController? _dualViewerChrome;
 
@@ -118,6 +119,8 @@ namespace CorridorKey.Editor
             _gvmViewerIntegration = null;
             _trackMaskIntegration?.Dispose();
             _trackMaskIntegration = null;
+            _matAnyoneViewerIntegration?.Dispose();
+            _matAnyoneViewerIntegration = null;
             TeardownInputAnnotations();
             _parametersRail = null;
 
@@ -195,6 +198,8 @@ namespace CorridorKey.Editor
             _gvmViewerIntegration = null;
             _trackMaskIntegration?.Dispose();
             _trackMaskIntegration = null;
+            _matAnyoneViewerIntegration?.Dispose();
+            _matAnyoneViewerIntegration = null;
             TeardownInputAnnotations();
             if (_playheadStrip != null)
             {
@@ -285,6 +290,7 @@ namespace CorridorKey.Editor
             {
                 _trackMaskIntegration?.Dispose();
                 _biRefNetViewerIntegration?.Dispose();
+                _matAnyoneViewerIntegration?.Dispose();
                 _biRefNetViewerIntegration = new BiRefNetViewerIntegration(
                     _backend,
                     body,
@@ -305,6 +311,13 @@ namespace CorridorKey.Editor
                     onSam2TrackSucceeded: ScheduleRefreshPlayheadForCurrentFrame,
                     onQueueJobFailed: (vm, detail) => _queuePresenter?.FailJob(vm, detail),
                     onQueueJobUpdated: vm => _queuePresenter?.Refresh(vm));
+                _matAnyoneViewerIntegration = new MatAnyoneViewerIntegration(
+                    _backend,
+                    body,
+                    _sampleAbComparisonRenderer,
+                    _gpuAbComparisonRenderer,
+                    _dualViewerChrome,
+                    onQueueJobFailed: (vm, detail) => _queuePresenter?.FailJob(vm, detail));
             }
 
             _dualViewerChrome.AbToggled += on =>
@@ -333,6 +346,7 @@ namespace CorridorKey.Editor
                 _biRefNetViewerIntegration,
                 _gvmViewerIntegration,
                 _trackMaskIntegration,
+                _matAnyoneViewerIntegration,
                 _queuePresenter,
                 () => _inputAnnotations?.HasAnyAnnotations() ?? false);
             _inputAnnotations.AnnotationPersistenceChanged += OnAnnotationPersistenceChanged;
