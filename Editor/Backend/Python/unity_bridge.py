@@ -164,6 +164,16 @@ def _dispatch(msg: dict) -> bool:
             daemon=True,
         ).start()
         return True
+    if cmd == "alpha.videomama_hint":
+        clip_root = msg.get("clip_root") or ""
+        frames_dir = msg.get("frames_dir") or ""
+        overwrite = bool(msg.get("overwrite", False))
+        threading.Thread(
+            target=alpha_generation._run_alpha_videomama_hint,
+            args=(rid, clip_root, frames_dir, overwrite),
+            daemon=True,
+        ).start()
+        return True
     if cmd == "guided.sam2_track":
         clip_root = msg.get("clip_root") or ""
         frames_dir = msg.get("frames_dir") or ""

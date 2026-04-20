@@ -76,6 +76,7 @@ namespace CorridorKey.Editor.UI
         readonly GvmViewerIntegration? _gvmViewerIntegration;
         readonly TrackMaskIntegration? _trackMaskIntegration;
         readonly MatAnyoneViewerIntegration? _matAnyoneIntegration;
+        readonly VideoMamaViewerIntegration? _videoMamaIntegration;
         readonly QueuePresenter? _queuePresenter;
         readonly Func<bool>? _hasSavedAnnotationStrokes;
 
@@ -97,6 +98,7 @@ namespace CorridorKey.Editor.UI
             GvmViewerIntegration? gvmViewerIntegration = null,
             TrackMaskIntegration? trackMaskIntegration = null,
             MatAnyoneViewerIntegration? matAnyoneIntegration = null,
+            VideoMamaViewerIntegration? videoMamaIntegration = null,
             QueuePresenter? queuePresenter = null,
             Func<bool>? hasSavedAnnotationStrokes = null)
         {
@@ -104,6 +106,7 @@ namespace CorridorKey.Editor.UI
             _gvmViewerIntegration = gvmViewerIntegration;
             _trackMaskIntegration = trackMaskIntegration;
             _matAnyoneIntegration = matAnyoneIntegration;
+            _videoMamaIntegration = videoMamaIntegration;
             _queuePresenter = queuePresenter;
             _hasSavedAnnotationStrokes = hasSavedAnnotationStrokes;
             _modeAutoBtn = root.Q<Button>("parameters-toggle-auto")
@@ -236,7 +239,14 @@ namespace CorridorKey.Editor.UI
         void OnMattingVideoMaMaClicked()
         {
             CorridorKeyWindowLayout.SetEzChromeToggleExclusive(_mattingEngineVmBtn, _mattingEngineMatBtn);
-            Debug.Log("[CorridorKey] VIDEOMAMA selected.");
+            var vm = VideoMamaAlphaHintQueueJob.CreateJobVm();
+            _queuePresenter?.Enqueue(vm);
+            if (_videoMamaIntegration != null)
+            {
+                _videoMamaIntegration.RequestVideoMamaForDefaultClip(vm);
+                return;
+            }
+            Debug.Log("[CorridorKey] VIDEOMAMA selected (no integration).");
         }
 
         void OnAlphaHintRadioGvmChanged(ChangeEvent<bool> evt)

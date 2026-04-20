@@ -48,6 +48,7 @@ namespace CorridorKey.Editor
         GvmViewerIntegration? _gvmViewerIntegration;
         TrackMaskIntegration? _trackMaskIntegration;
         MatAnyoneViewerIntegration? _matAnyoneViewerIntegration;
+        VideoMamaViewerIntegration? _videoMamaViewerIntegration;
 
         DualViewerChromeController? _dualViewerChrome;
 
@@ -121,6 +122,8 @@ namespace CorridorKey.Editor
             _trackMaskIntegration = null;
             _matAnyoneViewerIntegration?.Dispose();
             _matAnyoneViewerIntegration = null;
+            _videoMamaViewerIntegration?.Dispose();
+            _videoMamaViewerIntegration = null;
             TeardownInputAnnotations();
             _parametersRail = null;
 
@@ -200,6 +203,8 @@ namespace CorridorKey.Editor
             _trackMaskIntegration = null;
             _matAnyoneViewerIntegration?.Dispose();
             _matAnyoneViewerIntegration = null;
+            _videoMamaViewerIntegration?.Dispose();
+            _videoMamaViewerIntegration = null;
             TeardownInputAnnotations();
             if (_playheadStrip != null)
             {
@@ -291,6 +296,7 @@ namespace CorridorKey.Editor
                 _trackMaskIntegration?.Dispose();
                 _biRefNetViewerIntegration?.Dispose();
                 _matAnyoneViewerIntegration?.Dispose();
+                _videoMamaViewerIntegration?.Dispose();
                 _biRefNetViewerIntegration = new BiRefNetViewerIntegration(
                     _backend,
                     body,
@@ -312,6 +318,13 @@ namespace CorridorKey.Editor
                     onQueueJobFailed: (vm, detail) => _queuePresenter?.FailJob(vm, detail),
                     onQueueJobUpdated: vm => _queuePresenter?.Refresh(vm));
                 _matAnyoneViewerIntegration = new MatAnyoneViewerIntegration(
+                    _backend,
+                    body,
+                    _sampleAbComparisonRenderer,
+                    _gpuAbComparisonRenderer,
+                    _dualViewerChrome,
+                    onQueueJobFailed: (vm, detail) => _queuePresenter?.FailJob(vm, detail));
+                _videoMamaViewerIntegration = new VideoMamaViewerIntegration(
                     _backend,
                     body,
                     _sampleAbComparisonRenderer,
@@ -347,6 +360,7 @@ namespace CorridorKey.Editor
                 _gvmViewerIntegration,
                 _trackMaskIntegration,
                 _matAnyoneViewerIntegration,
+                _videoMamaViewerIntegration,
                 _queuePresenter,
                 () => _inputAnnotations?.HasAnyAnnotations() ?? false);
             _inputAnnotations.AnnotationPersistenceChanged += OnAnnotationPersistenceChanged;

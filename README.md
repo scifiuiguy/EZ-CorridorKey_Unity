@@ -121,6 +121,11 @@ The Editor talks to EZ via `Editor/Backend/Python/unity_bridge.py` (stdio NDJSON
 
 Then open **Tools > CorridorKey > Open** for the main window and use **File > Run Backend Health Check** in that window to verify the bridge. Successful health runs `backend.ffmpeg_tools.discovery.validate_ffmpeg_install` inside EZ.
 
+### Guided matting backend status
+
+- `MatAnyone2` is integrated into the Unity bridge queue flow and has been validated in this workspace.
+- `VideoMaMa` is integrated to the same bridge/runner pattern, but end-to-end validation is currently **untested locally** due to VideoMaMa model size (`~37 GB`) exceeding available disk budget on this machine.
+
 ---
 
 ## Package Layout
