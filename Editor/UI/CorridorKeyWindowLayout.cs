@@ -1527,7 +1527,7 @@ namespace CorridorKey.Editor.UI
             tray.style.flexShrink = 0;
             tray.style.flexGrow = 0;
             tray.style.flexDirection = FlexDirection.Column;
-            tray.style.height = 150f;
+            tray.style.height = 230f;
             tray.style.minHeight = VerticalViewerIoTraySplitController.MinIoTrayHeightPx;
             tray.style.marginBottom = 6f;
             tray.style.paddingTop = 6f;
@@ -1604,6 +1604,24 @@ namespace CorridorKey.Editor.UI
             inputHeaderRow.Add(inputTitle);
             inputHeaderRow.Add(ioTrayInputActions);
             inputSide.Add(inputHeaderRow);
+
+            var inputScroll = new ScrollView { name = "io-tray-input-scroll" };
+            inputScroll.style.flexGrow = 1f;
+            inputScroll.style.flexShrink = 1f;
+            inputScroll.style.minHeight = 0f;
+            inputScroll.mode = ScrollViewMode.Vertical;
+
+            var inputCards = new VisualElement { name = "io-tray-input-cards" };
+            inputCards.style.flexDirection = FlexDirection.Row;
+            inputCards.style.flexWrap = Wrap.Wrap;
+            inputCards.style.alignContent = Align.FlexStart;
+            inputCards.style.alignItems = Align.FlexStart;
+            inputCards.style.paddingBottom = 4f;
+            inputCards.style.minHeight = 0f;
+            inputCards.style.flexGrow = 1f;
+            inputCards.style.flexShrink = 1f;
+            inputScroll.Add(inputCards);
+            inputSide.Add(inputScroll);
 
             var exportSide = new VisualElement { name = "io-tray-exports" };
             exportSide.style.flexGrow = 1;

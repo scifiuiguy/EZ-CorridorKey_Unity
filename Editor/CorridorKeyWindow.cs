@@ -62,6 +62,7 @@ namespace CorridorKey.Editor
         Image? _playheadOutputImage;
         InputAnnotationRasterController? _inputAnnotations;
         ParametersRailController? _parametersRail;
+        InputClipCardsController? _inputClipCards;
 
         /// <summary>Unity may persist <see cref="EditorWindow"/> fields across domain reloads; reset in <see cref="CreateGUI"/>.</summary>
         [System.NonSerialized]
@@ -157,6 +158,12 @@ namespace CorridorKey.Editor
             _plateFramePaths = null;
             _playheadClipRoot = null;
             _viewerBody = null;
+            if (_inputClipCards != null)
+            {
+                _inputClipCards.ClipSelected -= OnInputClipSelected;
+                _inputClipCards.SelectionCleared -= OnInputClipSelectionCleared;
+            }
+            _inputClipCards = null;
 
             if (_backend != null)
             {
@@ -243,6 +250,12 @@ namespace CorridorKey.Editor
             _plateFramePaths = null;
             _playheadClipRoot = null;
             _viewerBody = null;
+            if (_inputClipCards != null)
+            {
+                _inputClipCards.ClipSelected -= OnInputClipSelected;
+                _inputClipCards.SelectionCleared -= OnInputClipSelectionCleared;
+            }
+            _inputClipCards = null;
             _parametersRail = null;
             if (_inferenceSectionController != null)
             {
@@ -393,6 +406,9 @@ namespace CorridorKey.Editor
                 () => _playheadStrip != null ? _playheadStrip.CurrentStemIndex : 0,
                 () => _playheadInputImage);
             _inputAnnotations.SetPlayheadStrip(_playheadStrip);
+            _inputClipCards = new InputClipCardsController(body);
+            _inputClipCards.ClipSelected += OnInputClipSelected;
+            _inputClipCards.SelectionCleared += OnInputClipSelectionCleared;
             _parametersRail = new ParametersRailController(
                 body,
                 _biRefNetViewerIntegration,
@@ -404,6 +420,7 @@ namespace CorridorKey.Editor
                 () => _inputAnnotations?.HasAnyAnnotations() ?? false);
             _inputAnnotations.AnnotationPersistenceChanged += OnAnnotationPersistenceChanged;
             WirePlayheadFromDefaultTestClip();
+            RefreshInputClipCards();
             // Session restore (incl. window geometry) must run after Show/docking completes — same-frame restore
             // can NRE inside HostView.RegisterSelectedPane (UnityEditor).
             EditorApplication.delayCall -= DeferredSessionRestore;
@@ -555,6 +572,58 @@ namespace CorridorKey.Editor
             _playheadStrip.SetStemIndex(0, notify: true);
         }
 
+        void RefreshInputClipCards()
+        {
+            if (_inputClipCards == null)
+                return;
+            if (!CorridorKeyWorkspacePaths.TryGetDefaultWorkspaceRoot(out var workspaceRoot))
+                return;
+            _inputClipCards.RefreshFromWorkspace(workspaceRoot);
+            if (!string.IsNullOrEmpty(_playheadClipRoot))
+                _inputClipCards.SetSelected(_playheadClipRoot);
+        }
+
+        void OnInputClipSelected(string clipRoot)
+        {
+            WirePlayheadFromClipRoot(clipRoot);
+        }
+
+        void OnInputClipSelectionCleared()
+        {
+            _plateFramePaths = null;
+            _playheadClipRoot = null;
+            _playheadStrip?.SetFrameCount(0);
+            _inputAnnotations?.SetClipRoot(null);
+            ClearPlayheadInputPaneToPlaceholder();
+            ClearPlayheadOutputPaneToPlaceholder();
+            _sampleAbComparisonRenderer?.SetComparisonSourcesFromAbsoluteFiles(null, null);
+            _gpuAbComparisonRenderer?.SetComparisonSourcesFromAbsoluteFiles(null, null);
+        }
+
+        void WirePlayheadFromClipRoot(string clipRoot)
+        {
+            if (_playheadStrip == null || _viewerBody == null)
+                return;
+
+            _plateFramePaths = null;
+            _playheadClipRoot = null;
+            var framesDir = Path.Combine(clipRoot, "Frames");
+            if (!ClipPlateFramePaths.TryCollectSortedPlateFrames(framesDir, out var paths))
+            {
+                _playheadStrip.SetFrameCount(0);
+                _inputAnnotations?.SetClipRoot(null);
+                return;
+            }
+
+            _playheadClipRoot = clipRoot;
+            _inputAnnotations?.SetClipRoot(clipRoot);
+            _plateFramePaths = paths;
+            _playheadStrip.SetFrameCount(paths.Count);
+            _dualViewerChrome?.SelectViewModeById("alpha");
+            _playheadStrip.SetStemIndex(0, notify: true);
+            _inputClipCards?.SetSelected(clipRoot);
+        }
+
         /// <summary>
         /// Loads INPUT plate + OUTPUT for the scrubbed frame. OUTPUT currently uses <c>AlphaHint/{stem}.png</c>
         /// (assumes ALPHA / alpha-hint view). Later: resolve OUTPUT path from dual-viewer channel / session (comp, matte, etc.).
@@ -661,6 +730,23 @@ namespace CorridorKey.Editor
                 outPh.style.display = DisplayStyle.Flex;
             if (_playheadOutputImage != null)
                 _playheadOutputImage.style.display = DisplayStyle.None;
+        }
+
+        void ClearPlayheadInputPaneToPlaceholder()
+        {
+            if (_viewerBody == null)
+                return;
+            if (_playheadInputImage != null && _playheadInputImage.image is Texture2D oldIn)
+            {
+                Object.DestroyImmediate(oldIn);
+                _playheadInputImage.image = null;
+            }
+
+            var ph = _viewerBody.Q<Label>("viewer-input-placeholder-label");
+            if (ph != null)
+                ph.style.display = DisplayStyle.Flex;
+            if (_playheadInputImage != null)
+                _playheadInputImage.style.display = DisplayStyle.None;
         }
 
         void ShowPlayheadPaneWithTexture(string paneName, Image img)
