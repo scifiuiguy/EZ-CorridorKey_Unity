@@ -1,9 +1,11 @@
 #nullable enable
+using System;
 using System.Collections.Generic;
 using System.IO;
 using CorridorKey.Backend.Payloads;
 using CorridorKey.Editor.Backend;
 using CorridorKey.Editor.Integration;
+using CorridorKey.Editor.Session;
 using CorridorKey.Editor.UI;
 using CorridorKey.Editor.UI.Presenters;
 using CorridorKey.Editor.ViewModels;
@@ -91,6 +93,13 @@ namespace CorridorKey.Editor
         IVisualElementScheduledItem? _inferenceLoadTestSchedule;
         float _testLoadAnimPercent;
 
+        const double PeriodicAutosaveSeconds = 60.0;
+        const double DebounceSaveSeconds = 0.5;
+        double _lastPeriodicAutosaveTime;
+        bool _sessionDirty;
+        double _debouncedSaveDueAt;
+        bool _sessionLoadInProgress;
+
         [MenuItem("Tools/CorridorKey/Open", false, 10)]
         public static void OpenWindow()
         {
@@ -105,6 +114,9 @@ namespace CorridorKey.Editor
             _backend.LogReceived += OnBackendLog;
             _backend.HealthReceived += OnBackendHealth;
             _session = new CorridorKeySessionVm(_backend);
+            _lastPeriodicAutosaveTime = EditorApplication.timeSinceStartup;
+            EditorApplication.update += OnEditorUpdate;
+            EditorApplication.quitting += OnEditorQuitting;
         }
 
         /// <summary>Invoked from the window menu bar (File) or future toolbar controls.</summary>
@@ -115,6 +127,10 @@ namespace CorridorKey.Editor
 
         void OnDisable()
         {
+            SaveCorridorKeySessionIfPossible();
+            EditorApplication.update -= OnEditorUpdate;
+            EditorApplication.quitting -= OnEditorQuitting;
+
             StopInferenceLoadTestAnimation();
 
             _biRefNetViewerIntegration?.Dispose();
@@ -160,8 +176,13 @@ namespace CorridorKey.Editor
             }
             _parametersSidebar = null;
             if (_inferenceSectionController != null)
+            {
                 _inferenceSectionController.InputColorSpaceChanged -= OnInputColorSpaceChanged;
+                _inferenceSectionController.InferenceParamsChanged -= OnSessionUiChanged;
+            }
             _inferenceSectionController = null;
+            if (_outputPerformanceSectionController != null)
+                _outputPerformanceSectionController.SessionStateChanged -= OnSessionUiChanged;
             _outputPerformanceSectionController = null;
             _viewerIoSplit?.Dispose();
             _viewerIoSplit = null;
@@ -224,8 +245,13 @@ namespace CorridorKey.Editor
             _viewerBody = null;
             _parametersRail = null;
             if (_inferenceSectionController != null)
+            {
                 _inferenceSectionController.InputColorSpaceChanged -= OnInputColorSpaceChanged;
+                _inferenceSectionController.InferenceParamsChanged -= OnSessionUiChanged;
+            }
             _inferenceSectionController = null;
+            if (_outputPerformanceSectionController != null)
+                _outputPerformanceSectionController.SessionStateChanged -= OnSessionUiChanged;
             _outputPerformanceSectionController = null;
 
             var root = rootVisualElement;
@@ -276,9 +302,10 @@ namespace CorridorKey.Editor
             if (parametersRail != null)
             {
                 _inferenceSectionController = new InferenceSectionController(parametersRail);
-                _inputIsLinear = _inferenceSectionController.InputIsLinear;
                 _inferenceSectionController.InputColorSpaceChanged += OnInputColorSpaceChanged;
+                _inferenceSectionController.InferenceParamsChanged += OnSessionUiChanged;
                 _outputPerformanceSectionController = new OutputPerformanceSectionController(parametersRail);
+                _outputPerformanceSectionController.SessionStateChanged += OnSessionUiChanged;
             }
 
             _viewerIoSplit = HorizontalViewerIoSplitController.TryAttach(body);
@@ -289,8 +316,9 @@ namespace CorridorKey.Editor
             _abScrubberOverlay = new AbScrubberOverlayController(body);
             _sampleAbComparisonRenderer = new SampleAbComparisonRenderer(body);
             _gpuAbComparisonRenderer = new GpuAbComparisonRenderer(body);
-            _sampleAbComparisonRenderer.SetInputIsLinear(_inputIsLinear);
-            _gpuAbComparisonRenderer.SetInputIsLinear(_inputIsLinear);
+            var initialLinear = _inferenceSectionController?.InputIsLinear ?? false;
+            _sampleAbComparisonRenderer.SetInputIsLinear(initialLinear);
+            _gpuAbComparisonRenderer.SetInputIsLinear(initialLinear);
             if (_abScrubberOverlay != null && _sampleAbComparisonRenderer != null)
             {
                 _abScrubberOverlay.SplitChanged += _sampleAbComparisonRenderer.SetSplit;
@@ -376,6 +404,10 @@ namespace CorridorKey.Editor
                 () => _inputAnnotations?.HasAnyAnnotations() ?? false);
             _inputAnnotations.AnnotationPersistenceChanged += OnAnnotationPersistenceChanged;
             WirePlayheadFromDefaultTestClip();
+            // Session restore (incl. window geometry) must run after Show/docking completes — same-frame restore
+            // can NRE inside HostView.RegisterSelectedPane (UnityEditor).
+            EditorApplication.delayCall -= DeferredSessionRestore;
+            EditorApplication.delayCall += DeferredSessionRestore;
 
             body.Q<Button>("status-run-selected")?.RegisterCallback<ClickEvent>(_ =>
                 Debug.Log("[CorridorKey] RUN SELECTED clicked."));
@@ -579,9 +611,20 @@ namespace CorridorKey.Editor
         void OnInputColorSpaceChanged(bool inputIsLinear)
         {
             _inputIsLinear = inputIsLinear;
+            RememberClipInputLinear(inputIsLinear);
             _sampleAbComparisonRenderer?.SetInputIsLinear(inputIsLinear);
             _gpuAbComparisonRenderer?.SetInputIsLinear(inputIsLinear);
             RefreshPlayheadForCurrentFrame();
+        }
+
+        void RememberClipInputLinear(bool linear)
+        {
+            if (string.IsNullOrEmpty(_playheadClipRoot) || _session == null)
+                return;
+            var name = Path.GetFileName(_playheadClipRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (string.IsNullOrEmpty(name))
+                return;
+            _session.ClipInputIsLinear[name] = linear;
         }
 
         void ApplyInputColorSpaceForDisplay(Texture2D texture)
@@ -933,9 +976,10 @@ namespace CorridorKey.Editor
             Debug.Log("[CorridorKey] File > Import Clips > Import Image Sequence... clicked.");
         }
 
-        static void OnMenuSaveSession()
+        void OnMenuSaveSession()
         {
-            Debug.Log("[CorridorKey] File > Save Session clicked.");
+            SaveCorridorKeySessionIfPossible();
+            Debug.Log("[CorridorKey] File > Save Session — wrote .corridorkey_session.json when workspace is available.");
         }
 
         static void OnMenuOpenProject()
@@ -1020,6 +1064,177 @@ namespace CorridorKey.Editor
         {
             Debug.Log("[CorridorKey] File > Exit clicked.");
             Close();
+        }
+
+        void OnSessionUiChanged()
+        {
+            MarkSessionDirty();
+        }
+
+        void OnEditorUpdate()
+        {
+            if (_viewerBody == null)
+                return;
+            var now = EditorApplication.timeSinceStartup;
+            if (now - _lastPeriodicAutosaveTime >= PeriodicAutosaveSeconds)
+            {
+                _lastPeriodicAutosaveTime = now;
+                SaveCorridorKeySessionIfPossible();
+            }
+
+            if (_sessionDirty && now >= _debouncedSaveDueAt)
+            {
+                _sessionDirty = false;
+                SaveCorridorKeySessionIfPossible();
+            }
+        }
+
+        void OnEditorQuitting()
+        {
+            SaveCorridorKeySessionIfPossible();
+        }
+
+        void MarkSessionDirty()
+        {
+            if (_sessionLoadInProgress)
+                return;
+            _sessionDirty = true;
+            _debouncedSaveDueAt = EditorApplication.timeSinceStartup + DebounceSaveSeconds;
+        }
+
+        void DeferredSessionRestore()
+        {
+            EditorApplication.delayCall -= DeferredSessionRestore;
+            if (rootVisualElement == null)
+                return;
+            TryLoadCorridorKeySession();
+            ApplyClipInputLinearForCurrentClipFromSession();
+            SyncInputFromInference();
+        }
+
+        void TryLoadCorridorKeySession()
+        {
+            if (!CorridorKeyWorkspacePaths.TryGetDefaultWorkspaceRoot(out var workspaceRoot))
+                return;
+            if (!CorridorKeyWorkspacePaths.IsWorkspacePathAllowed(workspaceRoot))
+                return;
+            var path = CorridorKeySessionPersistence.GetSessionPath(workspaceRoot);
+            if (path == null || !CorridorKeySessionPersistence.TryRead(path, out var payload))
+                return;
+
+            _sessionLoadInProgress = true;
+            try
+            {
+                if (payload.ClipInputIsLinear != null && _session != null)
+                {
+                    _session.ClipInputIsLinear.Clear();
+                    foreach (var kv in payload.ClipInputIsLinear)
+                        _session.ClipInputIsLinear[kv.Key] = kv.Value;
+                }
+
+                _inferenceSectionController?.ApplyInferenceParamsPayload(payload.Params, true, payload.LivePreview);
+                _outputPerformanceSectionController?.ApplyOutputConfigPayload(payload.OutputConfig);
+
+                if (payload.Geometry != null)
+                {
+                    var g = payload.Geometry;
+                    var w = Mathf.Max((int)MinWindowSize.x, g.Width);
+                    var h = Mathf.Max((int)MinWindowSize.y, g.Height);
+                    position = new Rect(g.X, g.Y, w, h);
+                }
+
+                if (payload.SplitterSizes is { Count: 2 } ss && ss[0] > 0 && ss[1] > 0)
+                    _viewerIoSplit?.SetViewerSplitFromSavedPaneWidths(ss[0], ss[1]);
+
+                if (payload.VsplitterSizes is { Count: 2 } vs && vs[0] > 0 && vs[1] > 0)
+                    _viewerIoTraySplit?.RestoreIoTrayHeight(vs[1]);
+            }
+            finally
+            {
+                _sessionLoadInProgress = false;
+            }
+        }
+
+        void ApplyClipInputLinearForCurrentClipFromSession()
+        {
+            if (_session == null || _inferenceSectionController == null || string.IsNullOrEmpty(_playheadClipRoot))
+                return;
+            var name = Path.GetFileName(_playheadClipRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (string.IsNullOrEmpty(name))
+                return;
+            if (!_session.ClipInputIsLinear.TryGetValue(name, out var linear))
+                return;
+            _inferenceSectionController.SetInputIsLinearWithoutNotify(linear);
+        }
+
+        void SyncInputFromInference()
+        {
+            if (_inferenceSectionController == null)
+                return;
+            _inputIsLinear = _inferenceSectionController.InputIsLinear;
+            _sampleAbComparisonRenderer?.SetInputIsLinear(_inputIsLinear);
+            _gpuAbComparisonRenderer?.SetInputIsLinear(_inputIsLinear);
+            RefreshPlayheadForCurrentFrame();
+        }
+
+        string? TryGetSelectedClipNameForSession()
+        {
+            if (string.IsNullOrEmpty(_playheadClipRoot))
+                return null;
+            return Path.GetFileName(_playheadClipRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        }
+
+        void SaveCorridorKeySessionIfPossible()
+        {
+            if (_sessionLoadInProgress)
+                return;
+            if (_inferenceSectionController == null || _outputPerformanceSectionController == null)
+                return;
+            if (!CorridorKeyWorkspacePaths.TryGetDefaultWorkspaceRoot(out var workspaceRoot))
+                return;
+            if (!CorridorKeyWorkspacePaths.IsWorkspacePathAllowed(workspaceRoot))
+                return;
+
+            var path = CorridorKeySessionPersistence.GetSessionPath(workspaceRoot);
+            if (path == null)
+                return;
+
+            var payload = new CorridorKeySessionPayload
+            {
+                Version = CorridorKeySessionPayload.SupportedVersion,
+                Params = _inferenceSectionController.CaptureInferenceParamsPayload(),
+                OutputConfig = _outputPerformanceSectionController.CaptureOutputConfigPayload(),
+                LivePreview = _inferenceSectionController.LivePreviewEnabled,
+                Geometry = new SessionGeometryPayload
+                {
+                    X = (int)position.x,
+                    Y = (int)position.y,
+                    Width = (int)position.width,
+                    Height = (int)position.height,
+                },
+                WorkspacePath = workspaceRoot,
+                SelectedClip = TryGetSelectedClipNameForSession(),
+            };
+
+            if (_session != null && _session.ClipInputIsLinear.Count > 0)
+                payload.ClipInputIsLinear = new Dictionary<string, bool>(_session.ClipInputIsLinear);
+
+            var leftPx = 0;
+            var rightPx = 0;
+            _viewerIoSplit?.TryGetPaneWidths(out leftPx, out rightPx);
+            if (leftPx > 0 && rightPx > 0)
+                payload.SplitterSizes = new List<int> { leftPx, rightPx };
+
+            if (_viewerBody != null)
+            {
+                var viewerRow = _viewerBody.Q<VisualElement>("viewer-params-block-row");
+                var vb = Mathf.RoundToInt(viewerRow?.layout.height ?? 0f);
+                var io = Mathf.RoundToInt(_viewerIoTraySplit?.CurrentIoTrayHeightPx ?? 0f);
+                if (vb > 0 && io > 0)
+                    payload.VsplitterSizes = new List<int> { vb, io };
+            }
+
+            CorridorKeySessionPersistence.Write(path, payload);
         }
     }
 }

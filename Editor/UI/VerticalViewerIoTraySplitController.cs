@@ -126,6 +126,16 @@ namespace CorridorKey.Editor.UI
             }
         }
 
+        /// <summary>EZ <c>vsplitter_sizes</c> second element — I/O tray height in pixels.</summary>
+        public float CurrentIoTrayHeightPx =>
+            _ioTrayHeight > 0f ? _ioTrayHeight : Mathf.Max(_ioTray.layout.height, MinIoTrayHeightPx);
+
+        public void RestoreIoTrayHeight(float heightPx)
+        {
+            _ioTrayHeight = Mathf.Max(heightPx, MinIoTrayHeightPx);
+            _workspaceColumn.schedule.Execute(_ => ApplyIoTrayHeight());
+        }
+
         void ApplyIoTrayHeight()
         {
             var totalH = _workspaceColumn.layout.height;

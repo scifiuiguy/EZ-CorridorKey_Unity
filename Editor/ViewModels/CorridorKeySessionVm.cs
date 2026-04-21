@@ -19,5 +19,8 @@ namespace CorridorKey.Editor.ViewModels
         public List<ClipRowVm> Clips { get; } = new();
 
         public ClipRowVm? SelectedClip { get; set; }
+
+        /// <summary>EZ <c>clip_input_is_linear</c> — per-clip color interpretation overrides.</summary>
+        public Dictionary<string, bool> ClipInputIsLinear { get; } = new();
     }
 }

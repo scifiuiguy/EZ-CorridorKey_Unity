@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using CorridorKey.Editor.Session;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -20,7 +21,12 @@ namespace CorridorKey.Editor.UI
         readonly Slider _refinerSlider;
         readonly Toggle _livePreview;
 
+        bool _suppress;
+
         public event Action<bool>? InputColorSpaceChanged;
+
+        /// <summary>EZ <c>ParameterPanel.params_changed</c> — inference rail only (not output/performance).</summary>
+        public event Action? InferenceParamsChanged;
 
         public bool InputIsLinear { get; private set; }
 
@@ -62,24 +68,87 @@ namespace CorridorKey.Editor.UI
             SyncRefinerLabel();
         }
 
+        public InferenceParamsPayload CaptureInferenceParamsPayload()
+        {
+            return new InferenceParamsPayload
+            {
+                InputIsLinear = InputIsLinear,
+                DespillStrength = _despillSlider.value / 10f,
+                AutoDespeckle = _despeckleToggle.value,
+                DespeckleSize = _despecklePx.value,
+                DespeckleDilation = 25,
+                DespeckleBlur = 5,
+                RefinerScale = _refinerSlider.value / 10f,
+                SourcePassthrough = true,
+                EdgeErodePx = null,
+                EdgeBlurPx = null,
+            };
+        }
+
+        public void ApplyInferenceParamsPayload(InferenceParamsPayload p, bool applyLivePreview, bool livePreview)
+        {
+            _suppress = true;
+            try
+            {
+                _colorDropdown.value = p.InputIsLinear ? "Linear" : "sRGB";
+                InputIsLinear = p.InputIsLinear;
+                _despillSlider.value = Mathf.Clamp(p.DespillStrength * 10f, 0f, 10f);
+                _despeckleToggle.value = p.AutoDespeckle;
+                _despecklePx.value = Mathf.Max(1, p.DespeckleSize);
+                _refinerSlider.value = Mathf.Clamp(p.RefinerScale * 10f, 0f, 30f);
+                if (applyLivePreview)
+                    _livePreview.value = livePreview;
+                SyncDespillLabel();
+                SyncRefinerLabel();
+            }
+            finally
+            {
+                _suppress = false;
+            }
+        }
+
+        public bool LivePreviewEnabled => _livePreview.value;
+
+        public void SetLivePreviewWithoutNotify(bool value)
+        {
+            _suppress = true;
+            try
+            {
+                _livePreview.value = value;
+            }
+            finally
+            {
+                _suppress = false;
+            }
+        }
+
+        public void SetInputIsLinearWithoutNotify(bool linear)
+        {
+            _suppress = true;
+            try
+            {
+                _colorDropdown.value = linear ? "Linear" : "sRGB";
+                InputIsLinear = linear;
+            }
+            finally
+            {
+                _suppress = false;
+            }
+        }
+
         /// <summary>EZ <c>ParameterPanel.params_changed</c> equivalent — call after any inference control updates.</summary>
         void NotifyInferenceParamsChanged()
         {
-            // var despillStrength = _despillSlider.value / 10f;
-            // var refinerScale = _refinerSlider.value / 10f;
-            // Debug.Log(
-            //     "[CorridorKey] Inference params_changed (EZ parity): " +
-            //     $"input_is_linear={InputIsLinear}, " +
-            //     $"despill_strength={despillStrength:0.###}, " +
-            //     $"auto_despeckle={_despeckleToggle.value}, " +
-            //     $"despeckle_size_px={_despecklePx.value}, " +
-            //     $"refiner_scale={refinerScale:0.###}, " +
-            //     $"live_preview={_livePreview.value}");
+            if (_suppress)
+                return;
+            InferenceParamsChanged?.Invoke();
         }
 
         void OnDropdownChanged(ChangeEvent<string> evt)
         {
             InputIsLinear = IsLinearSelection(evt.newValue);
+            if (_suppress)
+                return;
             InputColorSpaceChanged?.Invoke(InputIsLinear);
             NotifyInferenceParamsChanged();
         }

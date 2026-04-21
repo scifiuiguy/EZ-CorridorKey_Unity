@@ -161,6 +161,31 @@ namespace CorridorKey.Editor.UI
             }
         }
 
+        /// <summary>EZ <c>splitter_sizes</c> — left/right pane widths in pixels (approximate from layout).</summary>
+        public void TryGetPaneWidths(out int leftPx, out int rightPx)
+        {
+            leftPx = Mathf.RoundToInt(_left.layout.width);
+            rightPx = Mathf.RoundToInt(_right.layout.width);
+        }
+
+        public float ViewerSplitRatio => _ratio;
+
+        public void SetViewerSplitRatio(float ratio)
+        {
+            _ratio = Mathf.Clamp(ratio, 0.12f, 0.88f);
+            _dualHost.schedule.Execute(_ => ApplyLayoutFromRatio());
+        }
+
+        /// <summary>Restore from EZ session <c>splitter_sizes</c> <c>[left, right]</c>.</summary>
+        public void SetViewerSplitFromSavedPaneWidths(int leftPx, int rightPx)
+        {
+            if (leftPx <= 0 || rightPx <= 0)
+                return;
+            var inner = leftPx + rightPx;
+            _ratio = Mathf.Clamp(leftPx / (float)inner, 0.12f, 0.88f);
+            _dualHost.schedule.Execute(_ => ApplyLayoutFromRatio());
+        }
+
         void ApplyLayoutFromRatio()
         {
             var qW = _queueSidebar.layout.width;
