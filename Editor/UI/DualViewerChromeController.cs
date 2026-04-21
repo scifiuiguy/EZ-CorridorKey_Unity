@@ -12,6 +12,7 @@ namespace CorridorKey.Editor.UI
     {
         public event System.Action<bool>? AbToggled;
         public event System.Action<bool>? AbRendererModeToggled;
+        public event System.Action<string>? ViewModeChanged;
 
         readonly Button _abButton;
         readonly Button _abRendererButton;
@@ -87,6 +88,25 @@ namespace CorridorKey.Editor.UI
             }
         }
 
+        public string SelectedViewModeId =>
+            _selectedModeIndex >= 0 && _selectedModeIndex < _modeIds.Length ? _modeIds[_selectedModeIndex] : "input";
+
+        public void SetViewModeEnabled(string modeId, bool enabled)
+        {
+            if (string.IsNullOrEmpty(modeId))
+                return;
+            for (var i = 0; i < _modeIds.Length; i++)
+            {
+                if (!string.Equals(_modeIds[i], modeId, System.StringComparison.Ordinal))
+                    continue;
+                var btn = _modeButtons[i];
+                if (btn == null)
+                    return;
+                btn.SetEnabled(enabled);
+                return;
+            }
+        }
+
         void OnAbClicked(ClickEvent evt)
         {
             evt.StopPropagation();
@@ -123,6 +143,7 @@ namespace CorridorKey.Editor.UI
             _selectedModeIndex = index;
             SetModeActive(index, true);
             Debug.Log($"[CorridorKey] View mode: {_modeIds[index]}");
+            ViewModeChanged?.Invoke(_modeIds[index]);
         }
 
         void SetAbVisual(bool on)

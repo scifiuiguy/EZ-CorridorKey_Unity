@@ -395,6 +395,7 @@ namespace CorridorKey.Editor
                 _abGpuPreviewEnabled = gpuOn;
                 ApplyAbPreviewMode();
             };
+            _dualViewerChrome.ViewModeChanged += _ => RefreshPlayheadForCurrentFrame();
             ApplyAbPreviewMode();
 
             _viewerBody = body;
@@ -554,6 +555,7 @@ namespace CorridorKey.Editor
             {
                 _playheadStrip.SetFrameCount(0);
                 _inputAnnotations?.SetClipRoot(null);
+                RefreshDualViewerViewModeGating();
                 return;
             }
 
@@ -561,14 +563,16 @@ namespace CorridorKey.Editor
             {
                 _playheadStrip.SetFrameCount(0);
                 _inputAnnotations?.SetClipRoot(null);
+                RefreshDualViewerViewModeGating();
                 return;
             }
 
             _playheadClipRoot = clipRoot;
             _inputAnnotations?.SetClipRoot(clipRoot);
             _plateFramePaths = paths;
+            RefreshDualViewerViewModeGating();
             _playheadStrip.SetFrameCount(paths.Count);
-            _dualViewerChrome?.SelectViewModeById("alpha");
+            EnsureValidSelectedViewMode();
             _playheadStrip.SetStemIndex(0, notify: true);
         }
 
@@ -592,6 +596,7 @@ namespace CorridorKey.Editor
         {
             _plateFramePaths = null;
             _playheadClipRoot = null;
+            RefreshDualViewerViewModeGating();
             _playheadStrip?.SetFrameCount(0);
             _inputAnnotations?.SetClipRoot(null);
             ClearPlayheadInputPaneToPlaceholder();
@@ -618,8 +623,9 @@ namespace CorridorKey.Editor
             _playheadClipRoot = clipRoot;
             _inputAnnotations?.SetClipRoot(clipRoot);
             _plateFramePaths = paths;
+            RefreshDualViewerViewModeGating();
             _playheadStrip.SetFrameCount(paths.Count);
-            _dualViewerChrome?.SelectViewModeById("alpha");
+            EnsureValidSelectedViewMode();
             _playheadStrip.SetStemIndex(0, notify: true);
             _inputClipCards?.SetSelected(clipRoot);
         }
@@ -637,7 +643,10 @@ namespace CorridorKey.Editor
                 return;
 
             var platePath = _plateFramePaths[stemIndex];
-            var alphaPath = ClipPlateFramePaths.GetAlphaHintPathForPlateFrame(_playheadClipRoot, platePath);
+            RefreshDualViewerViewModeGating();
+            EnsureValidSelectedViewMode();
+            var selectedMode = _dualViewerChrome?.SelectedViewModeId ?? "input";
+            var outputPath = ClipPlateFramePaths.TryResolveViewModePath(_playheadClipRoot, platePath, selectedMode);
 
             var inTex = TextureFileLoader.LoadReadableFromFile(platePath);
             if (inTex == null)
@@ -656,14 +665,14 @@ namespace CorridorKey.Editor
 
             string? abOutputPath = null;
             EnsurePlayheadPaneImage("viewer-output", ref _playheadOutputImage);
-            if (File.Exists(alphaPath))
+            if (!string.Equals(selectedMode, "input", StringComparison.Ordinal) && !string.IsNullOrEmpty(outputPath) && File.Exists(outputPath))
             {
-                var outTex = TextureFileLoader.LoadReadableFromFile(alphaPath);
+                var outTex = TextureFileLoader.LoadReadableFromFile(outputPath);
                 if (outTex != null)
                 {
                     ReplacePlayheadPaneTexture(_playheadOutputImage!, outTex);
                     ShowPlayheadPaneWithTexture("viewer-output", _playheadOutputImage);
-                    abOutputPath = alphaPath;
+                    abOutputPath = outputPath;
                 }
                 else
                     ClearPlayheadOutputPaneToPlaceholder();
@@ -675,6 +684,41 @@ namespace CorridorKey.Editor
             _gpuAbComparisonRenderer?.SetComparisonSourcesFromAbsoluteFiles(platePath, abOutputPath);
 
             _inputAnnotations?.NotifyInputPlateUpdated();
+        }
+
+        void RefreshDualViewerViewModeGating()
+        {
+            if (_dualViewerChrome == null)
+                return;
+
+            var clipRoot = _playheadClipRoot;
+            var hasClip = !string.IsNullOrEmpty(clipRoot);
+
+            _dualViewerChrome.SetViewModeEnabled("input", hasClip);
+            _dualViewerChrome.SetViewModeEnabled("mask", hasClip && ClipPlateFramePaths.HasAnyFramesForMode(clipRoot!, "mask"));
+            _dualViewerChrome.SetViewModeEnabled("alpha", hasClip && ClipPlateFramePaths.HasAnyFramesForMode(clipRoot!, "alpha"));
+            _dualViewerChrome.SetViewModeEnabled("fg", hasClip && ClipPlateFramePaths.HasAnyFramesForMode(clipRoot!, "fg"));
+            _dualViewerChrome.SetViewModeEnabled("matte", hasClip && ClipPlateFramePaths.HasAnyFramesForMode(clipRoot!, "matte"));
+            _dualViewerChrome.SetViewModeEnabled("comp", hasClip && ClipPlateFramePaths.HasAnyFramesForMode(clipRoot!, "comp"));
+            _dualViewerChrome.SetViewModeEnabled("proc", hasClip && ClipPlateFramePaths.HasAnyFramesForMode(clipRoot!, "proc"));
+        }
+
+        void EnsureValidSelectedViewMode()
+        {
+            if (_dualViewerChrome == null || string.IsNullOrEmpty(_playheadClipRoot))
+                return;
+
+            var selected = _dualViewerChrome.SelectedViewModeId;
+            if (string.Equals(selected, "input", StringComparison.Ordinal))
+                return;
+
+            if (ClipPlateFramePaths.HasAnyFramesForMode(_playheadClipRoot, selected))
+                return;
+
+            if (ClipPlateFramePaths.HasAnyFramesForMode(_playheadClipRoot, "alpha"))
+                _dualViewerChrome.SelectViewModeById("alpha");
+            else
+                _dualViewerChrome.SelectViewModeById("input");
         }
 
         void OnInputColorSpaceChanged(bool inputIsLinear)
@@ -738,7 +782,7 @@ namespace CorridorKey.Editor
                 return;
             if (_playheadInputImage != null && _playheadInputImage.image is Texture2D oldIn)
             {
-                Object.DestroyImmediate(oldIn);
+                DestroyImmediate(oldIn);
                 _playheadInputImage.image = null;
             }
 
